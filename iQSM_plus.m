@@ -168,7 +168,7 @@ disp(' ')
 cprintf('*[0, 0, 0]', 'Saving all data as NetworkInput.mat for Pytorch Recon! \n');
 
 %% 1. save all the data into a NetworkInput.mat file.
-sf = 1;   %% for cooridinates mismatch;
+sf = -1;   %% for cooridinates mismatch;
 phase = single(phase);
 phase = sf * phase;
 
@@ -412,14 +412,3 @@ cprintf('*[0, 0, 0]', 'iQSM+ results successfully returned! \n');
 
 
 end
-
-
-
-
-
-
-
-
-
-
-
