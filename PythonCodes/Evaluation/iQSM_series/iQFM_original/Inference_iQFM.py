@@ -69,7 +69,7 @@ if __name__ == '__main__':
         LoT_Layer_iQSM = nn.DataParallel(LoT_Layer_iQSM)
 
         checkpoint_path = os.path.expanduser(
-            CheckpointsPath) + '/LoTLayer_lfs_100.pth'
+            CheckpointsPath) + '/LoTLayer_lfs_40_v2.pth'
         LoT_Layer_iQSM.load_state_dict(torch.load(
             checkpoint_path, map_location=device))
 
@@ -77,7 +77,7 @@ if __name__ == '__main__':
         Unet_chi = nn.DataParallel(Unet_chi)
 
         checkpoint_path = os.path.expanduser(
-            CheckpointsPath) + '/iQFM_100.pth'
+            CheckpointsPath) + '/iQFM_40_v2.pth'
         Unet_chi.load_state_dict(torch.load(
             checkpoint_path, map_location=device))
 

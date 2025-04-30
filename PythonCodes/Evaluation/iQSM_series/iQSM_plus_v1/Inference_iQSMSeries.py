@@ -97,8 +97,10 @@ if __name__ == '__main__':
         # Unet_chi.load_state_dict(state_dict_new)
 
         Unet_chi = Unet_chi.module
+        Unet_chi.eval()
 
         LoT_Layer_iQSM = LoT_Layer_iQSM.module
+        LoT_Layer_iQSM.eval()
 
         iQSM = LoT_Unet(LoT_Layer_iQSM, Unet_chi)
 
@@ -107,6 +109,7 @@ if __name__ == '__main__':
         iQSM.to(device)
 
         iQSM.eval()
+
 
         matImage = scio.loadmat(os.path.abspath(os.path.expanduser(InputPath)))
         image = matImage['phase']
@@ -180,6 +183,8 @@ if __name__ == '__main__':
         print(time_end - time_start)
 
         pred_chi = pred_chi * mask
+
+        # print(pred_chi.max())
 
         pred_chi = torch.squeeze(pred_chi, 0)
         pred_chi = torch.squeeze(pred_chi, 0)
