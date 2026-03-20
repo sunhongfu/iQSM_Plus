@@ -1,106 +1,127 @@
-# Plug-and-Play Latent Feature Editing for Orientation-Adaptive Quantitative Susceptibility Mapping Neural Networks
+# iQSM+ – Orientation-Adaptive Quantitative Susceptibility Mapping
 
-- This repository is for our iQSM+ method, which enables a direct QSM reconstruction from MRI raw phases acquired at arbitray orientations (https://doi.org/10.1016/j.media.2024.103160). 
+**Plug-and-Play Latent Feature Editing for Orientation-Adaptive Quantitative Susceptibility Mapping Neural Networks**
 
-- This code was built and tested on Win11 with RTX 4090, A4000, MacOS with M1 pro max, and a Centos 7.8 platform with Nvdia Tesla V100. 
+[MIA 2024](https://doi.org/10.1016/j.media.2024.103160) &nbsp;|&nbsp; [arXiv](https://arxiv.org/abs/2311.07823) &nbsp;|&nbsp; [deepMRI collection](https://github.com/sunhongfu/deepMRI)
 
-- Major update, 19, March, 2025: We now have new and more user-friendly matlab wrappers for iQSM+/iQSM/iQFM/xQSM/xQSM+ reconstuctions; 
+iQSM+ enables direct QSM reconstruction from raw MRI phase acquired at **arbitrary orientations**, using orientation-adaptive latent feature editing (OA-LFE) blocks that learn the encoding of acquisition orientation vectors and integrate them seamlessly into the network.
 
-- minor Update: For windows users: You will have to run iQSM_fcns/ConfigurePython.m first; modify variable "pyExec" (default: 'C:\Users\CSU\anaconda3\envs\Pytorch\python.exe', % conda environment path (windows)),   update the path with yours;
-- minor Update: see [Q&A about z_prjs](#head6) for how to calculate vairbal zprjs; 
+> **Update (March 2025):** New user-friendly MATLAB wrappers for iQSM+/iQSM/iQFM/xQSM/xQSM+ with simpler syntax — all available in this repo.
 
-# Content
+> **Windows users:** Run `iQSM_fcns/ConfigurePython.m` first and update the `pyExec` variable to your conda Python path.
 
-- [ Overview](#head1)
-  - [(1) Overall Framework](#head2)
-  - [(2) Representative Results](#head3)
-- [ Manual](#head4)
-  - [Requirements](#head5)
-  - [Quick Start](#head6)
-  - [Q&A about z_prjs](#head6)
+---
 
-# <span id="head1"> Overview </span>
+## Overview
 
-## <span id="head2">(1) Overall Framework </span>
+### Framework
 
-![Whole Framework](https://github.com/sunhongfu/deepMRI/blob/master/iQSM_Plus/figs/fig1.png)
-Fig. 1: The overall structure of the proposed (a) Orientation-Adaptive Neural Network, which is constructed by incorporating (b) Plug-and-Play Orientation-Adaptive Latent Feature Editing (OA-LFE) blocks onto conventional deep neural networks. The proposed OA-LFE can learn the encoding of acquisition orientation vectors and seamlessly integrate them into the latent features of deep networks.
+![Whole Framework](https://github.com/sunhongfu/iQSM_Plus/blob/master/figs/fig1.png)
 
-## <span id="head3">(2) Representative Results </span>
+Fig. 1: The overall structure of the proposed Orientation-Adaptive Neural Network, incorporating OA-LFE blocks that learn orientation encoding and integrate it into latent features.
 
-![Representative Results](https://github.com/sunhongfu/deepMRI/blob/master/iQSM_Plus/figs/fig3.png)
-Fig. 2: Comparison of the original iQSM, iQSM-Mixed, and the proposed iQSM+ methods on (a) two simulated brains with different acquisition orientations, and (b) four in vivo brains scanned at multiple 3T MRI platforms. 
+### Representative Results
 
-# <span id="head4"> Manual </span>
+![Representative Results](https://github.com/sunhongfu/iQSM_Plus/blob/master/figs/fig3.png)
 
-## <span id="head5"> Requirements </span>
+Fig. 2: Comparison of iQSM, iQSM-Mixed, and iQSM+ on simulated brains at different acquisition orientations and in vivo 3T scans.
 
-    - Python 3.7 or later
-    - NVDIA GPU (CUDA 10.0)
-    - Anaconda Navigator (4.6.11) for Pytorch Installation
-    - Pytorch 1.8 or later
-    - MATLAB 2017b or later
-    - BET tool from FSL tool box
+---
 
-## <span id="head6"> Quick Start (on demo data) </span>
+## Requirements
 
-It is assume that you have imported/converted your data input matlab matrices. 
+- Python 3.7+, PyTorch 1.8+
+- NVIDIA GPU (CUDA 10.0+)
+- MATLAB R2017b+
+- FSL (for BET brain mask extraction)
 
-The MATLAB function to run is 'iQSM_plus'. The function returns the iQSM+ result and saves its NIFTI format 'iQSM_plus.nii' and its matlab matrix 'iQSM.mat' in user-defined output folder (default location is current working directory)
+Tested on: Windows 11 (RTX 4090 / A4000), macOS (M1 Pro Max), CentOS 7.8 (Tesla V100).
 
-Compulsory Inputs are:
+---
 
-1. phase: GRE (gradient echo) MRI phase data;
-organized as a 3D (single-echo, e.g., a 256 x 256 x 128 numerical volume)
-or 4D volume (multi-echo data,  e.g., a data volume of size 256 x 256 x 128 x 8);
-2. TE: Echo Time; Here are two example inputs for
-  i. a single-echo data: TE = 20 * 1e-3; (unit: seconds);
-  ii. a n-echo data (1xn vector): TE = [4, 8, 12, 16, 20, 24, 28, ...] * 1e-3; (unit: seconds);
+## Quick Start
 
-Optional Inputs are:
+### 1. Clone and set up environment
 
-3. mag: magnitude data, which is a numerical volume of the same size as the
-   phase input; default: ones;
-4. mask: Brain Mask ROI, whose size is the same as the phase input (1-st
-   echo); default: ones;
-5. voxel_size: image resolution; default: [1 1 1] mm isotropic;
-6. B0_dir: B0 field direction; the same as B0_dir in MEDI toolbox;
-   default: [0 0 1] for pure axial head orientation;
-7. B0: B0 field strength; detault: 3 (unit: Tesla);
-8. eroded_rad: a radius for brain mask erosion control;
-   default: 3 (3-voxel erosion);
-9. output_dir: directory/folder for output of temporary and final results
-   default: pwd (current working directory)
-********************************
+```bash
+git clone https://github.com/sunhongfu/iQSM_Plus.git
+cd iQSM_Plus
 
-see more details in the matlab code
-
-example usage:
-```
-QSM = iQSM_plus(phase, TE, 'mag', mag, 'mask', mask, 'voxel_size', [1, 1, 1], 'B0', 3, 'B0_dir', [0, 0, 1], 'eroded_rad', 3, 'output_dir', pwd);
-
+conda create -n iQSM_Plus python=3.8
+conda activate iQSM_Plus
+conda install pytorch torchvision cudatoolkit=10.2 -c pytorch
+conda install scipy
 ```
 
-for xQSM+ reconstruction, the syntax is similar:
+### 2. Run reconstruction (MATLAB)
 
+```matlab
+QSM = iQSM_plus(phase, TE, 'mag', mag, 'mask', mask, 'voxel_size', [1,1,1], 'B0', 3, 'B0_dir', [0,0,1], 'eroded_rad', 3, 'output_dir', pwd);
 ```
-QSM = xQSM_plus(lfs, 'mask', mask, 'B0_dir', [0, 0, 1], 'voxel_size', [1, 1, 1], 'output_dir', pwd);  % for xQSM;
+
+For xQSM+ reconstruction:
+
+```matlab
+QSM = xQSM_plus(lfs, 'mask', mask, 'B0_dir', [0,0,1], 'voxel_size', [1,1,1], 'output_dir', pwd);
 ```
 
-## <span id="head7"> How to calculate variable "B0_dir" </span>
+---
 
-suppose that you have read the dico_info from your dicom files with dicominfo.m (matlab func)
-then:
+## MATLAB Wrapper: iQSM_plus
 
-```
-% angles!!! (z projections)
+**Compulsory inputs:**
+- `phase` — 3D (single-echo) or 4D (multi-echo) GRE phase volume
+- `TE` — echo time(s) in seconds, e.g. `20e-3` or `[4,8,12,16,20,24,28]*1e-3`
+
+**Optional inputs:**
+- `mag` — magnitude volume (default: ones)
+- `mask` — brain mask (default: ones)
+- `voxel_size` — resolution in mm (default: `[1 1 1]`)
+- `B0_dir` — B0 field direction (default: `[0 0 1]` for axial)
+- `B0` — field strength in Tesla (default: `3`)
+- `eroded_rad` — brain mask erosion radius in voxels (default: `3`)
+- `output_dir` — output folder (default: current directory)
+
+Outputs: `iQSM_plus.nii` (NIfTI) and `iQSM.mat` saved to `output_dir`.
+
+---
+
+## How to Calculate B0_dir from DICOM
+
+```matlab
 Xz = dicom_info.ImageOrientationPatient(3);
 Yz = dicom_info.ImageOrientationPatient(6);
-Zz = sqrt(1 - Xz^2 - Yz^2);
-Zxyz = cross(dicom_info.ImageOrientationPatient(1:3),dicom_info.ImageOrientationPatient(4:6));
+Zxyz = cross(dicom_info.ImageOrientationPatient(1:3), dicom_info.ImageOrientationPatient(4:6));
 Zz = Zxyz(3);
 B0_dir = [Xz, Yz, Zz];
 ```
 
+---
 
-[⬆ top](#readme)
+## Available Reconstruction Functions
+
+| Function | Task |
+|----------|------|
+| `iQSM_plus` | Single-step QSM at arbitrary orientation |
+| `iQSM` | Single-step QSM (axial) |
+| `iQFM` | Single-step tissue field mapping |
+| `xQSM_plus` | xQSM dipole inversion at arbitrary orientation |
+| `xQSM` | xQSM dipole inversion (axial) |
+| `SQNet` | — |
+
+---
+
+## Citation
+
+```bibtex
+@article{iqsmplus2024,
+  title={Plug-and-Play Latent Feature Editing for Orientation-Adaptive Quantitative Susceptibility Mapping Neural Networks},
+  journal={Medical Image Analysis},
+  year={2024},
+  doi={10.1016/j.media.2024.103160}
+}
+```
+
+---
+
+[⬆ top](#iqsm--orientation-adaptive-quantitative-susceptibility-mapping) &nbsp;|&nbsp; [deepMRI collection](https://github.com/sunhongfu/deepMRI)
