@@ -23,7 +23,7 @@ from inference import run_iqsm_plus
 # Demo data (mirrors app.py)
 # ---------------------------------------------------------------------------
 _DEMO_BASE      = "https://github.com/sunhongfu/iQSM_Plus/releases/download/v1.0-demo"
-_DEMO_CACHE_DIR = os.path.join(tempfile.gettempdir(), "iqsm_plus_demo")
+_DEMO_CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "demo")
 _DEMO_TE        = [0.0032, 0.0065, 0.0098, 0.0131, 0.0164, 0.0197, 0.0231, 0.0264]
 
 
