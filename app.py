@@ -360,7 +360,7 @@ HELP_NEGATE = (
 
 
 def build_ui():
-    with gr.Blocks(title=TITLE, theme=gr.themes.Soft()) as demo:
+    with gr.Blocks(title=TITLE) as demo:
         gr.Markdown(f"# {TITLE}")
         gr.Markdown(DESCRIPTION)
 
@@ -545,6 +545,7 @@ if __name__ == "__main__":
 
     demo = build_ui()
     demo.launch(
+        theme=gr.themes.Soft(),
         share=args.share,
         server_name=args.server_name,
         server_port=args.server_port,
