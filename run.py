@@ -47,12 +47,10 @@ def _download_demo() -> tuple[str, str, str]:
 
 
 def run_demo(output_dir: str):
+    te_str = " ".join(f"{te:.4g}" for te in _DEMO_TE)
     print("── iQSM+ demo ─────────────────────────────────────────────────────────")
     print("  Downloading demo data (cached after first run) …")
     phase_path, mag_path, mask_path = _download_demo()
-
-    te_cli  = " ".join(f"{te:.4g}" for te in _DEMO_TE)
-    te_yaml = "\n    - ".join(f"{te:.4g}" for te in _DEMO_TE)
 
     print(f"""
   Demo dataset: multi-echo in-vivo brain (64×64×32 crop)
@@ -60,7 +58,7 @@ def run_demo(output_dir: str):
     Magnitude:  {mag_path}
     Mask:       {mask_path}
     Voxel size: 1 × 1 × 1 mm
-    Echoes:     8  (TE = {te_cli} s)
+    Echoes:     8  (TE = {te_str} s)
     B0:         3 T
 
   To run on your own data, use an equivalent command:
@@ -69,7 +67,7 @@ def run_demo(output_dir: str):
         --phase  YOUR_PHASE.nii.gz \\
         --mag    YOUR_MAG.nii.gz   \\
         --mask   YOUR_MASK.nii.gz  \\
-        --te     {te_cli} \\
+        --te     {te_str} \\
         --b0     3.0               \\
         --voxel-size 1 1 1         \\
         --output ./results/
