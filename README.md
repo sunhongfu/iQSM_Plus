@@ -28,20 +28,68 @@ Fig. 2: Comparison of iQSM, iQSM-Mixed, and iQSM+ on simulated brains at differe
 
 ---
 
+## Quick Start – No MATLAB Required (Web App)
+
+iQSM+ is available as a **browser-based web app** — no MATLAB, no command line needed.
+
+### Option A – Docker (recommended)
+
+```bash
+# 1. Install Docker Desktop: https://docs.docker.com/get-docker/
+git clone https://github.com/sunhongfu/iQSM_Plus.git
+cd iQSM_Plus
+
+# CPU (works on any machine including Apple Silicon)
+docker compose up
+
+# NVIDIA GPU (Linux only – needs NVIDIA Container Toolkit)
+# Edit docker-compose.yml: set TORCH_VARIANT to cu121, uncomment GPU block
+docker compose up
+
+# Open browser: http://localhost:7860
+```
+
+### Option B – Conda
+
+```bash
+git clone https://github.com/sunhongfu/iQSM_Plus.git
+cd iQSM_Plus
+conda env create -f environment.yml
+conda activate iqsm-plus
+python app.py   # opens http://localhost:7860
+```
+
+### Option C – pip
+
+```bash
+pip install torch   # see requirements.txt for platform-specific instructions
+pip install -r requirements.txt
+python app.py
+```
+
+**Web UI features:**
+- Upload phase NIfTI (`.nii` / `.nii.gz`) or DICOM
+- Echo times auto-extracted from DICOM headers
+- Optionally upload magnitude and brain mask
+- Click **Run Reconstruction**
+- Download QSM result NIfTI — view in FSLeyes / ITK-SNAP / 3D Slicer
+
+---
+
 ## Requirements
 
 - Python 3.7+, PyTorch 1.8+
-- NVIDIA GPU (CUDA 10.0+)
-- MATLAB R2017b+
-- FSL (for BET brain mask extraction)
+- NVIDIA GPU recommended (CPU also supported)
+- MATLAB R2017b+ (for MATLAB wrappers only — not needed for web app)
+- FSL (for BET brain mask extraction, optional)
 
 Tested on: Windows 11 (RTX 4090 / A4000), macOS (M1 Pro Max), CentOS 7.8 (Tesla V100).
 
 ---
 
-## Quick Start
+## MATLAB Quick Start
 
-### 1. Clone and set up environment
+### Clone and set up environment
 
 ```bash
 git clone https://github.com/sunhongfu/iQSM_Plus.git
@@ -53,7 +101,7 @@ conda install pytorch torchvision cudatoolkit=10.2 -c pytorch
 conda install scipy
 ```
 
-### 2. Run reconstruction (MATLAB)
+### Run reconstruction (MATLAB)
 
 ```matlab
 QSM = iQSM_plus(phase, TE, 'mag', mag, 'mask', mask, 'voxel_size', [1,1,1], 'B0', 3, 'B0_dir', [0,0,1], 'eroded_rad', 3, 'output_dir', pwd);
