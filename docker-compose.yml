@@ -35,6 +35,7 @@ services:
     volumes:
       # QSM outputs are saved here on your host machine
       - ./outputs:/tmp/iqsm_outputs
+      - ./demo:/iQSM_Plus/demo          # demo NIfTIs — persists across restarts
     restart: unless-stopped
 
     # ── NVIDIA GPU – uncomment the block below for Linux + NVIDIA GPU ─────────
