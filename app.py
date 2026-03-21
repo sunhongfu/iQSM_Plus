@@ -16,12 +16,93 @@ import argparse
 import os
 import tempfile
 import traceback
+import urllib.request
 
 import gradio as gr
 import nibabel as nib
 import numpy as np
 
 from inference import run_iqsm_plus
+
+
+# ---------------------------------------------------------------------------
+# Demo data – multi-echo in-vivo brain, 1×1×1 mm, B0=3T, 8 echoes
+# Hosted as GitHub Release assets so they work in Docker and bare Python.
+# ---------------------------------------------------------------------------
+_DEMO_BASE = (
+    "https://github.com/sunhongfu/iQSM_Plus/releases/download/v1.0-demo"
+)
+_DEMO_PHASE = f"{_DEMO_BASE}/ph_multi_echo.nii.gz"
+_DEMO_MAG   = f"{_DEMO_BASE}/mag_multi_echo.nii.gz"
+_DEMO_MASK  = f"{_DEMO_BASE}/mask_multi_echo.nii.gz"
+_DEMO_CACHE_DIR = os.path.join(tempfile.gettempdir(), "iqsm_plus_demo")
+
+# 8-echo TEs in seconds (from demo_multi_echo.m)
+_DEMO_TE = [0.0032, 0.0065, 0.0098, 0.0131, 0.0164, 0.0197, 0.0231, 0.0264]
+
+
+def _download_demo() -> tuple[str, str, str]:
+    """Download demo files (cached after first run). Returns (phase, mag, mask) paths."""
+    os.makedirs(_DEMO_CACHE_DIR, exist_ok=True)
+    phase_path = os.path.join(_DEMO_CACHE_DIR, "ph_multi_echo.nii.gz")
+    mag_path   = os.path.join(_DEMO_CACHE_DIR, "mag_multi_echo.nii.gz")
+    mask_path  = os.path.join(_DEMO_CACHE_DIR, "mask_multi_echo.nii.gz")
+
+    for url, path in [
+        (_DEMO_PHASE, phase_path),
+        (_DEMO_MAG,   mag_path),
+        (_DEMO_MASK,  mask_path),
+    ]:
+        if not os.path.exists(path):
+            print(f"Downloading demo file: {url}")
+            try:
+                urllib.request.urlretrieve(url, path)
+            except Exception as exc:
+                raise gr.Error(
+                    f"Could not download demo data from GitHub Releases.\n{exc}\n\n"
+                    "Please upload your own phase NIfTI file instead."
+                )
+    return phase_path, mag_path, mask_path
+
+
+def load_and_run_demo(progress=gr.Progress(track_tqdm=True)):
+    """Download demo data and run reconstruction end-to-end."""
+    def _progress(frac, msg):
+        progress(frac, desc=msg)
+
+    _progress(0.0, "Downloading demo data …")
+    try:
+        phase_path, mag_path, mask_path = _download_demo()
+    except gr.Error:
+        raise
+    except Exception as exc:
+        raise gr.Error(str(exc))
+
+    output_dir = tempfile.mkdtemp(prefix="iqsm_plus_demo_")
+    try:
+        out_path = run_iqsm_plus(
+            phase_nii_path=phase_path,
+            te_values=_DEMO_TE,
+            mag_nii_path=mag_path,
+            mask_nii_path=mask_path,
+            voxel_size=[1, 1, 1],
+            b0_dir=None,
+            b0=3.0,
+            eroded_rad=0,
+            phase_sign=-1,
+            output_dir=output_dir,
+            progress_fn=_progress,
+        )
+    except Exception:
+        raise gr.Error("Demo reconstruction failed.\n\n" + traceback.format_exc())
+
+    try:
+        ax_img, cor_img, sag_img = _make_slice_figure(out_path)
+    except Exception:
+        ax_img = cor_img = sag_img = None
+
+    status = "✅ Demo complete! Download QSM NIfTI below."
+    return status, out_path, ax_img, cor_img, sag_img
 
 # dicom_utils is imported lazily inside the DICOM callbacks so that missing
 # pydicom only raises an error when the user actually tries the DICOM path.
@@ -383,7 +464,14 @@ def build_ui():
                 )
                 gr.Markdown(f"<small>{HELP_B0DIR}</small>")
 
-                run_btn = gr.Button("▶ Run Reconstruction", variant="primary", size="lg")
+                with gr.Row():
+                    run_btn  = gr.Button("▶ Run Reconstruction", variant="primary", size="lg")
+                    demo_btn = gr.Button("⚡ Run demo", variant="secondary", size="lg")
+
+                gr.Markdown(
+                    "<small>**Demo:** multi-echo in-vivo brain, 1×1×1 mm, 8 echoes "
+                    "(TE=3.2–26.4 ms), B0=3T. Downloaded automatically from GitHub Releases (~10 MB).</small>"
+                )
 
             # ── Right column: outputs ────────────────────────────────────
             with gr.Column(scale=1):
@@ -408,7 +496,9 @@ def build_ui():
                     coronal_img  = gr.Image(label="Coronal",  show_label=True)
                     sagittal_img = gr.Image(label="Sagittal", show_label=True)
 
-        # ── Wire up the button ───────────────────────────────────────────
+        _outputs = [status_box, download_file, axial_img, coronal_img, sagittal_img]
+
+        # ── Wire up the buttons ───────────────────────────────────────────
         run_btn.click(
             fn=reconstruct,
             inputs=[
@@ -421,7 +511,13 @@ def build_ui():
                 b0_val, eroded_rad,
                 negate_phase,
             ],
-            outputs=[status_box, download_file, axial_img, coronal_img, sagittal_img],
+            outputs=_outputs,
+        )
+
+        demo_btn.click(
+            fn=load_and_run_demo,
+            inputs=[],
+            outputs=_outputs,
         )
 
         gr.Markdown(
