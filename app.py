@@ -14,6 +14,7 @@ Docker:
 
 import argparse
 import os
+import re
 import tempfile
 import traceback
 import urllib.request
@@ -27,7 +28,6 @@ from inference import run_iqsm_plus
 
 # ---------------------------------------------------------------------------
 # Demo data – multi-echo in-vivo brain, 1×1×1 mm, B0=3T, 8 echoes
-# Hosted as GitHub Release assets so they work in Docker and bare Python.
 # ---------------------------------------------------------------------------
 _DEMO_BASE = (
     "https://github.com/sunhongfu/iQSM_Plus/releases/download/v1.0-demo"
@@ -37,8 +37,13 @@ _DEMO_MAG   = f"{_DEMO_BASE}/mag_multi_echo.nii.gz"
 _DEMO_MASK  = f"{_DEMO_BASE}/mask_multi_echo.nii.gz"
 _DEMO_CACHE_DIR = os.path.join(tempfile.gettempdir(), "iqsm_plus_demo")
 
-# 8-echo TEs in seconds (from demo_multi_echo.m)
-_DEMO_TE = [0.0032, 0.0065, 0.0098, 0.0131, 0.0164, 0.0197, 0.0231, 0.0264]
+# Demo acquisition parameters
+_DEMO_TE         = [0.0032, 0.0065, 0.0098, 0.0131, 0.0164, 0.0197, 0.0231, 0.0264]
+_DEMO_B0         = 3.0
+_DEMO_VOX        = "1 1 1"
+_DEMO_B0DIR      = ""
+_DEMO_ERODED_RAD = 0
+_DEMO_PHASE_SIGN = False
 
 
 def _download_demo() -> tuple[str, str, str]:
@@ -66,7 +71,7 @@ def _download_demo() -> tuple[str, str, str]:
 
 
 def load_and_run_demo(progress=gr.Progress(track_tqdm=True)):
-    """Download demo data and run reconstruction end-to-end."""
+    """Download demo data, fill all form fields, and run reconstruction."""
     def _progress(frac, msg):
         progress(frac, desc=msg)
 
@@ -87,8 +92,8 @@ def load_and_run_demo(progress=gr.Progress(track_tqdm=True)):
             mask_nii_path=mask_path,
             voxel_size=[1, 1, 1],
             b0_dir=None,
-            b0=3.0,
-            eroded_rad=0,
+            b0=_DEMO_B0,
+            eroded_rad=_DEMO_ERODED_RAD,
             phase_sign=-1,
             output_dir=output_dir,
             progress_fn=_progress,
@@ -101,11 +106,106 @@ def load_and_run_demo(progress=gr.Progress(track_tqdm=True)):
     except Exception:
         ax_img = cor_img = sag_img = None
 
+    te_str = ", ".join(f"{te:.4g}" for te in _DEMO_TE)
+    demo_info = (
+        f"Demo data cached at: {_DEMO_CACHE_DIR}\n"
+        f"  Phase:  ph_multi_echo.nii.gz\n"
+        f"  Mag:    mag_multi_echo.nii.gz\n"
+        f"  Mask:   mask_multi_echo.nii.gz\n"
+        "Parameters: 64×64×32 crop, 1×1×1 mm, 8 echoes, B0=3T"
+    )
     status = "✅ Demo complete! Download QSM NIfTI below."
-    return status, out_path, ax_img, cor_img, sag_img
 
-# dicom_utils is imported lazily inside the DICOM callbacks so that missing
-# pydicom only raises an error when the user actually tries the DICOM path.
+    return (
+        # --- input field updates ---
+        phase_path,                               # phase_file
+        mag_path,                                 # mag_file
+        mask_path,                                # mask_file
+        te_str,                                   # te_str
+        _DEMO_VOX,                                # voxel_str
+        _DEMO_B0DIR,                              # b0dir_str
+        _DEMO_B0,                                 # b0_val
+        _DEMO_ERODED_RAD,                         # eroded_rad
+        _DEMO_PHASE_SIGN,                         # negate_phase
+        gr.update(value=demo_info, visible=True), # demo_info_box
+        # --- output results ---
+        status, out_path, ax_img, cor_img, sag_img,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Metadata extraction from uploaded NIfTI
+# ---------------------------------------------------------------------------
+
+def extract_nii_metadata(file_obj):
+    """
+    Called when a phase NIfTI is uploaded.
+    Returns updates for: te_str, voxel_str, b0_val
+    Auto-fills voxel size from the header; attempts to parse TE from descrip.
+    """
+    if file_obj is None:
+        return gr.update(), gr.update(), gr.update()
+    try:
+        img = nib.load(file_obj.name)
+        zooms = img.header.get_zooms()
+        voxel_str = f"{zooms[0]:.4g} {zooms[1]:.4g} {zooms[2]:.4g}"
+
+        te_update = gr.update()
+        try:
+            descrip = img.header.get("descrip", b"")
+            if isinstance(descrip, (bytes, bytearray)):
+                descrip = descrip.decode("utf-8", errors="ignore")
+            descrip = descrip.strip()
+            m = re.search(r"TE\s*=\s*([\d.]+)\s*(ms)?", descrip, re.IGNORECASE)
+            if m:
+                te_val = float(m.group(1))
+                if m.group(2) and m.group(2).lower() == "ms":
+                    te_val /= 1000.0
+                te_update = gr.update(value=str(te_val))
+        except Exception:
+            pass
+
+        return te_update, gr.update(value=voxel_str), gr.update()
+    except Exception:
+        return gr.update(), gr.update(), gr.update()
+
+
+# ---------------------------------------------------------------------------
+# DICOM helper callbacks
+# ---------------------------------------------------------------------------
+
+def _auto_fill_from_dicom(dcm_files):
+    """
+    Called when DICOM phase files are uploaded.
+    Returns updates for: te_str, voxel_str, b0_val
+    """
+    if not dcm_files:
+        return gr.update(), gr.update(), gr.update()
+    try:
+        from dicom_utils import extract_te_from_dicoms, extract_metadata_from_dicoms
+        paths = [f.name for f in dcm_files]
+
+        te_update  = gr.update()
+        vox_update = gr.update()
+        b0_update  = gr.update()
+
+        te_values = extract_te_from_dicoms(paths)
+        if te_values:
+            te_update = gr.update(value=", ".join(f"{te:.6g}" for te in te_values))
+
+        try:
+            meta = extract_metadata_from_dicoms(paths)
+            if meta.get("voxel_size"):
+                v = meta["voxel_size"]
+                vox_update = gr.update(value=f"{v[0]:.4g} {v[1]:.4g} {v[2]:.4g}")
+            if meta.get("b0"):
+                b0_update = gr.update(value=float(meta["b0"]))
+        except Exception:
+            pass
+
+        return te_update, vox_update, b0_update
+    except Exception:
+        return gr.update(), gr.update(), gr.update()
 
 
 # ---------------------------------------------------------------------------
@@ -113,7 +213,6 @@ def load_and_run_demo(progress=gr.Progress(track_tqdm=True)):
 # ---------------------------------------------------------------------------
 
 def _parse_floats(text: str, name: str, n: int | None = None) -> list[float]:
-    """Parse a comma- or space-separated string of floats."""
     try:
         vals = [float(v) for v in text.replace(",", " ").split()]
     except ValueError:
@@ -124,16 +223,11 @@ def _parse_floats(text: str, name: str, n: int | None = None) -> list[float]:
 
 
 def _make_slice_figure(nii_path: str):
-    """
-    Return (axial_img, coronal_img, sagittal_img) as numpy uint8 arrays
-    from the middle slice of a NIfTI volume.
-    """
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
     vol = nib.load(nii_path).get_fdata(dtype=np.float32)
-    # Normalise to [0, 1] for display
     vmin, vmax = np.percentile(vol, [2, 98])
     vol_n = np.clip((vol - vmin) / max(vmax - vmin, 1e-6), 0, 1)
 
@@ -160,40 +254,15 @@ def _make_slice_figure(nii_path: str):
 
 
 # ---------------------------------------------------------------------------
-# DICOM helper callbacks
-# ---------------------------------------------------------------------------
-
-def _auto_te_from_dicom(dcm_files) -> str:
-    """
-    Called when DICOM phase files are uploaded.
-    Returns echo times (seconds) as a comma-separated string for the TE box.
-    """
-    if not dcm_files:
-        return ""
-    try:
-        from dicom_utils import extract_te_from_dicoms
-        paths = [f.name for f in dcm_files]
-        te_values = extract_te_from_dicoms(paths)
-        if te_values:
-            return ", ".join(f"{te:.6g}" for te in te_values)
-    except Exception:
-        pass
-    return ""
-
-
-# ---------------------------------------------------------------------------
 # Core reconstruction callback
 # ---------------------------------------------------------------------------
 
 def reconstruct(
     input_mode,
-    # NIfTI inputs
     phase_file,
     mag_file,
-    # DICOM inputs
     phase_dcm,
     mag_dcm,
-    # Shared
     te_str,
     mask_file,
     voxel_str,
@@ -203,7 +272,6 @@ def reconstruct(
     negate_phase,
     progress=gr.Progress(track_tqdm=True),
 ):
-    # ── Resolve phase / magnitude paths and TE values ───────────────────────
     dcm_tmp = None
 
     if input_mode == "DICOM series":
@@ -232,30 +300,27 @@ def reconstruct(
             except Exception as exc:
                 raise gr.Error(f"Failed to read magnitude DICOM files: {exc}")
 
-        # Use DICOM-extracted TEs unless the user overrode the field
         if te_str.strip():
             te_values = _parse_floats(te_str, "Echo time(s) (TE)")
         else:
             te_values = dcm_te
             if not te_values:
                 raise gr.Error(
-                    "Could not extract echo times from the DICOM files.  "
+                    "Could not extract echo times from the DICOM files. "
                     "Please enter them manually in the TE field."
                 )
-
-    else:  # NIfTI mode
+    else:
         if phase_file is None:
             raise gr.Error("Please upload a phase NIfTI file.")
         if not te_str.strip():
             raise gr.Error("Please enter at least one echo time (TE).")
-        phase_nii_path = phase_file.name
-        mag_nii_path   = mag_file.name if mag_file else None
+        phase_nii_path = phase_file if isinstance(phase_file, str) else phase_file.name
+        mag_nii_path   = (mag_file if isinstance(mag_file, str) else mag_file.name) if mag_file else None
         te_values      = _parse_floats(te_str, "Echo time(s) (TE)")
 
     if any(t <= 0 for t in te_values):
         raise gr.Error("Echo times must be positive. Enter values in seconds (e.g. 0.020).")
 
-    # ── Optional parameters ─────────────────────────────────────────────────
     voxel_size = None
     if voxel_str.strip():
         voxel_size = _parse_floats(voxel_str, "Voxel size", n=3)
@@ -269,8 +334,6 @@ def reconstruct(
             raise gr.Error("B0 direction must not be the zero vector.")
 
     phase_sign = 1 if negate_phase else -1
-
-    # ── Run reconstruction ──────────────────────────────────────────────────
     output_dir = tempfile.mkdtemp(prefix="iqsm_plus_out_")
 
     def _progress(frac, msg):
@@ -281,7 +344,7 @@ def reconstruct(
             phase_nii_path=phase_nii_path,
             te_values=te_values,
             mag_nii_path=mag_nii_path,
-            mask_nii_path=mask_file.name if mask_file else None,
+            mask_nii_path=(mask_file if isinstance(mask_file, str) else mask_file.name) if mask_file else None,
             voxel_size=voxel_size,
             b0_dir=b0_dir,
             b0=float(b0_val),
@@ -296,7 +359,6 @@ def reconstruct(
             + traceback.format_exc()
         )
 
-    # ── Visualise result ────────────────────────────────────────────────────
     try:
         ax_img, cor_img, sag_img = _make_slice_figure(out_path)
     except Exception:
@@ -304,10 +366,8 @@ def reconstruct(
 
     status = (
         "✅ Reconstruction complete! "
-        "Use the Download button below to save the QSM NIfTI, "
-        "then open it in FSLeyes / ITK-SNAP / 3D Slicer."
+        "Use the Download button below to save the QSM NIfTI."
     )
-
     return status, out_path, ax_img, cor_img, sag_img
 
 
@@ -321,42 +381,15 @@ DESCRIPTION = """
 using the *iQSM+* deep learning model ([paper](https://doi.org/10.1016/j.media.2024.103160)).
 
 **Quick-start:**
-1. Upload your phase data as **NIfTI** or select the **DICOM** tab to upload raw DICOM files.
-2. Verify the echo time(s) **in seconds** (auto-filled for DICOM).
-3. Adjust parameters as needed and click **Run Reconstruction**.
-4. Download the QSM result and open it in FSLeyes / ITK-SNAP / 3D Slicer.
+1. Upload phase data as **NIfTI** or select the **DICOM** tab.
+2. Voxel size and TE are auto-filled from the file — verify before running.
+3. Click **▶ Run Reconstruction**. Or try **⚡ Run demo** instantly.
 """
 
-HELP_TE = (
-    "Echo time(s) in **seconds**. "
-    "Single-echo example: `0.020`. "
-    "Multi-echo example: `0.004, 0.008, 0.012, 0.016, 0.020`. "
-    "Auto-filled when DICOM files are uploaded."
-)
-HELP_VOX = (
-    "Voxel size in mm (x y z). "
-    "Leave blank to read from the NIfTI header or DICOM metadata (recommended). "
-    "Example: `1 1 2`."
-)
-HELP_B0DIR = (
-    "B0 field direction vector (unit vector). "
-    "Leave blank for default `0 0 1` (pure axial). "
-    "Example for tilted acquisition: `0.04 0.05 0.998`."
-)
-HELP_PHASE_NII = (
-    "Wrapped phase NIfTI file. "
-    "Expects **phase = −ΔB · γ · TE** convention. "
-    "3D (single-echo) or 4D (multi-echo) volumes are both supported."
-)
-HELP_PHASE_DCM = (
-    "Select **all** DICOM slice files from the phase series "
-    "(single- or multi-echo). Echo times are extracted automatically "
-    "from the DICOM headers and shown in the TE field below."
-)
-HELP_NEGATE = (
-    "Tick this if your QSM result looks inverted (veins appear bright instead of dark). "
-    "Some scanners store phase as **+ΔB · γ · TE**; ticking this corrects the convention."
-)
+HELP_TE    = "Echo time(s) in **seconds**. Single: `0.020`. Multi: `0.004, 0.008, 0.012`. Auto-filled from DICOM or NIfTI header."
+HELP_VOX   = "Voxel size in mm (x y z). Auto-filled from file header. Override if needed."
+HELP_B0DIR = "B0 field direction vector. Leave blank for default `0 0 1` (axial)."
+HELP_NEGATE = "Tick if QSM looks inverted (veins appear bright). Flips the phase sign convention."
 
 
 def build_ui():
@@ -365,39 +398,33 @@ def build_ui():
         gr.Markdown(DESCRIPTION)
 
         with gr.Row():
-            # ── Left column: inputs ──────────────────────────────────────
             with gr.Column(scale=1):
                 gr.Markdown("### Phase & magnitude input")
 
                 input_tabs = gr.Tabs()
                 with input_tabs:
-                    # ── NIfTI tab ─────────────────────────────────────────
                     with gr.Tab("NIfTI files"):
                         phase_file = gr.File(
-                            label="Phase NIfTI (.nii / .nii.gz)",
+                            label="Phase NIfTI (.nii / .nii.gz) — 3D single-echo or 4D multi-echo",
                             file_types=[".nii", ".gz"],
                         )
-                        gr.Markdown(f"<small>{HELP_PHASE_NII}</small>")
                         mag_file = gr.File(
                             label="Magnitude NIfTI (optional)",
                             file_types=[".nii", ".gz"],
                         )
 
-                    # ── DICOM tab ─────────────────────────────────────────
                     with gr.Tab("DICOM series"):
                         phase_dcm = gr.File(
                             label="Phase DICOM files (select all slices / all echoes)",
                             file_count="multiple",
                             file_types=[".dcm", ".ima", "."],
                         )
-                        gr.Markdown(f"<small>{HELP_PHASE_DCM}</small>")
                         mag_dcm = gr.File(
                             label="Magnitude DICOM files (optional)",
                             file_count="multiple",
                             file_types=[".dcm", ".ima", "."],
                         )
 
-                # input_mode tracks which tab is active (used in reconstruct)
                 input_mode = gr.State("NIfTI files")
                 input_tabs.change(
                     fn=lambda tab: tab,
@@ -405,20 +432,12 @@ def build_ui():
                     outputs=[input_mode],
                 )
 
-                # ── Shared: echo times ────────────────────────────────────
                 gr.Markdown("### Echo time(s)")
                 te_str = gr.Textbox(
-                    label="TE (seconds)",
+                    label="TE (seconds) — auto-filled from file",
                     placeholder="e.g.  0.020   or   0.004, 0.008, 0.012",
                 )
                 gr.Markdown(f"<small>{HELP_TE}</small>")
-
-                # Auto-populate TE when DICOM phase files are uploaded
-                phase_dcm.upload(
-                    fn=_auto_te_from_dicom,
-                    inputs=[phase_dcm],
-                    outputs=[te_str],
-                )
 
                 negate_phase = gr.Checkbox(
                     label="Reverse phase sign (opposite scanner convention)",
@@ -426,16 +445,13 @@ def build_ui():
                 )
                 gr.Markdown(f"<small>{HELP_NEGATE}</small>")
 
-                # ── Shared: brain mask ────────────────────────────────────
                 gr.Markdown("### Optional inputs")
                 mask_file = gr.File(
-                    label="Brain mask NIfTI (optional – 3D binary, speeds up inference)",
+                    label="Brain mask NIfTI (optional)",
                     file_types=[".nii", ".gz"],
                 )
 
-                # ── Acquisition parameters ────────────────────────────────
                 gr.Markdown("### Acquisition parameters")
-
                 with gr.Row():
                     b0_val = gr.Number(
                         label="B0 field strength (Tesla)",
@@ -453,7 +469,7 @@ def build_ui():
                     )
 
                 voxel_str = gr.Textbox(
-                    label="Voxel size override (mm, optional)",
+                    label="Voxel size (mm) — auto-filled from file header",
                     placeholder="e.g.  1 1 2",
                 )
                 gr.Markdown(f"<small>{HELP_VOX}</small>")
@@ -468,27 +484,22 @@ def build_ui():
                     run_btn  = gr.Button("▶ Run Reconstruction", variant="primary", size="lg")
                     demo_btn = gr.Button("⚡ Run demo", variant="secondary", size="lg")
 
-                gr.Markdown(
-                    "<small>**Demo:** multi-echo in-vivo brain, 1×1×1 mm, 8 echoes "
-                    "(TE=3.2–26.4 ms), B0=3T. Downloaded automatically from GitHub Releases (~10 MB).</small>"
+                demo_info_box = gr.Textbox(
+                    label="Demo data info",
+                    lines=5,
+                    interactive=False,
+                    visible=False,
                 )
 
-            # ── Right column: outputs ────────────────────────────────────
             with gr.Column(scale=1):
                 gr.Markdown("### Results")
-
                 status_box = gr.Textbox(
                     label="Status",
                     lines=2,
                     interactive=False,
                     placeholder="Reconstruction output will appear here …",
                 )
-
-                download_file = gr.File(
-                    label="⬇ Download QSM NIfTI",
-                    file_count="single",
-                    visible=True,
-                )
+                download_file = gr.File(label="⬇ Download QSM NIfTI")
 
                 gr.Markdown("#### Preview (middle slice)")
                 with gr.Row():
@@ -496,28 +507,44 @@ def build_ui():
                     coronal_img  = gr.Image(label="Coronal",  show_label=True)
                     sagittal_img = gr.Image(label="Sagittal", show_label=True)
 
-        _outputs = [status_box, download_file, axial_img, coronal_img, sagittal_img]
+        # Auto-fill from NIfTI upload
+        phase_file.change(
+            fn=extract_nii_metadata,
+            inputs=[phase_file],
+            outputs=[te_str, voxel_str, b0_val],
+        )
 
-        # ── Wire up the buttons ───────────────────────────────────────────
+        # Auto-fill TE, voxel size, B0 from DICOM upload
+        phase_dcm.upload(
+            fn=_auto_fill_from_dicom,
+            inputs=[phase_dcm],
+            outputs=[te_str, voxel_str, b0_val],
+        )
+
+        _run_outputs  = [status_box, download_file, axial_img, coronal_img, sagittal_img]
+        _demo_outputs = [
+            phase_file, mag_file, mask_file,
+            te_str, voxel_str, b0dir_str, b0_val, eroded_rad, negate_phase,
+            demo_info_box,
+        ] + _run_outputs
+
         run_btn.click(
             fn=reconstruct,
             inputs=[
                 input_mode,
                 phase_file, mag_file,
                 phase_dcm, mag_dcm,
-                te_str,
-                mask_file,
+                te_str, mask_file,
                 voxel_str, b0dir_str,
-                b0_val, eroded_rad,
-                negate_phase,
+                b0_val, eroded_rad, negate_phase,
             ],
-            outputs=_outputs,
+            outputs=_run_outputs,
         )
 
         demo_btn.click(
             fn=load_and_run_demo,
             inputs=[],
-            outputs=_outputs,
+            outputs=_demo_outputs,
         )
 
         gr.Markdown(
@@ -531,10 +558,6 @@ def build_ui():
 
     return demo
 
-
-# ---------------------------------------------------------------------------
-# Entry point
-# ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="iQSM+ Gradio server")

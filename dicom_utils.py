@@ -152,6 +152,38 @@ def extract_te_from_dicoms(file_paths: list[str]) -> list[float]:
     return sorted(te_set)
 
 
+def extract_metadata_from_dicoms(file_paths: list[str]) -> dict:
+    """
+    Read voxel size and B0 field strength from DICOM headers.
+
+    Returns
+    -------
+    dict with keys:
+        'voxel_size' : [x, y, z] in mm, or None
+        'b0'         : field strength in Tesla, or None
+    """
+    pydicom = _require_pydicom()
+    voxel_size = None
+    b0 = None
+    for p in file_paths:
+        try:
+            ds = pydicom.dcmread(p, stop_before_pixels=True, force=True)
+            if voxel_size is None:
+                px = getattr(ds, "PixelSpacing", None)
+                sl = getattr(ds, "SliceThickness", None)
+                if px is not None and sl is not None:
+                    voxel_size = [float(px[0]), float(px[1]), float(sl)]
+            if b0 is None:
+                fs = getattr(ds, "MagneticFieldStrength", None)
+                if fs is not None:
+                    b0 = float(fs)
+            if voxel_size is not None and b0 is not None:
+                break
+        except Exception:
+            continue
+    return {"voxel_size": voxel_size, "b0": b0}
+
+
 def read_dicom_series(
     file_paths: list[str],
 ) -> tuple[np.ndarray, np.ndarray, list[float]]:
