@@ -45,14 +45,28 @@ def _hf_pull(filenames: list[str]) -> dict[str, str]:
 
 
 def cmd_download_demo():
+    import json
     print(f"Fetching demo data from huggingface.co/{_HF_REPO} …")
-    paths = _hf_pull(_DEMO_FILES)
+    paths = _hf_pull(_DEMO_FILES + ["demo/params.json"])
     phase = paths["demo/ph_multi_echo.nii.gz"]
     mag   = paths["demo/mag_multi_echo.nii.gz"]
     mask  = paths["demo/mask_multi_echo.nii.gz"]
-    te_str = "0.0032 0.0065 0.0098 0.0131 0.0164 0.0197 0.0231 0.0264"
+    with open(paths["demo/params.json"]) as f:
+        p = json.load(f)
+    te     = p["TE_seconds"]
+    vox    = p["voxel_size_mm"]
+    b0     = p["B0_Tesla"]
+    sign   = p["phase_sign_convention"]
+    eroded = p.get("eroded_rad", 0)
+    mat    = "×".join(str(x) for x in p.get("matrix_size", []))
+    te_str  = str(te) if isinstance(te, (int, float)) else " ".join(f"{v:.4g}" for v in te)
+    vox_str = " ".join(str(v) for v in vox)
     print(f"""
-Demo dataset: multi-echo in-vivo brain, 256×256×128, 1×1×1 mm, 8 echoes, B0=3T
+Demo dataset: {p.get("description", "")}
+  Matrix:  {mat}
+  Voxel:   {vox_str} mm
+  TE:      {te_str} s
+  B0:      {b0} T
 
 To run reconstruction on this data:
 
@@ -61,9 +75,10 @@ To run reconstruction on this data:
         --mag    {mag} \\
         --mask   {mask} \\
         --te     {te_str} \\
-        --b0     3.0 \\
-        --voxel-size 1 1 1 \\
-        --phase-sign -1 \\
+        --b0     {b0} \\
+        --voxel-size {vox_str} \\
+        --eroded-rad {eroded} \\
+        --phase-sign {sign} \\
         --output ./iqsm_plus_demo_output/
 
 Or copy config.yaml, fill in the paths above, and run:

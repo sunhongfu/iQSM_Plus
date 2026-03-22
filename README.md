@@ -2,7 +2,7 @@
 
 **Plug-and-Play Latent Feature Editing for Orientation-Adaptive Quantitative Susceptibility Mapping Neural Networks**
 
-[MIA 2024](https://doi.org/10.1016/j.media.2024.103160) &nbsp;|&nbsp; [arXiv](https://arxiv.org/abs/2311.07823) &nbsp;|&nbsp; [deepMRI collection](https://github.com/sunhongfu/deepMRI)
+[MIA 2024](https://doi.org/10.1016/j.media.2024.103160) &nbsp;|&nbsp; [arXiv](https://arxiv.org/abs/2311.07823) &nbsp;|&nbsp; [HuggingFace](https://huggingface.co/sunhongfu/iQSM_Plus) &nbsp;|&nbsp; [deepMRI collection](https://github.com/sunhongfu/deepMRI)
 
 iQSM+ enables direct QSM reconstruction from raw MRI phase acquired at **arbitrary orientations**, using orientation-adaptive latent feature editing (OA-LFE) blocks that learn the encoding of acquisition orientation vectors and integrate them seamlessly into the network.
 
@@ -28,9 +28,40 @@ Fig. 2: Comparison of iQSM, iQSM-Mixed, and iQSM+ on simulated brains at differe
 
 ---
 
+## Model Checkpoints and Demo Data
+
+Pre-trained model weights and demo datasets are hosted on **[Hugging Face Hub](https://huggingface.co/sunhongfu/iQSM_Plus)** (`sunhongfu/iQSM_Plus`).
+
+**Why Hugging Face?**
+- GitHub repositories are not designed for large binary files. Hugging Face Hub provides reliable, version-controlled hosting for ML model weights and large NIfTI volumes with no file-size limits.
+- The `huggingface_hub` library handles caching automatically: files are downloaded once and stored in `~/.cache/huggingface/hub/`, so subsequent runs load from disk instantly.
+
+**Auto-download behaviour:**
+- **Checkpoints** — downloaded automatically on first inference (via `run.py` or `app.py`). No manual step required.
+- **Demo data** — downloaded when you run `python run.py --download-demo` or click **⬇ Load Demo Data** in the web app.
+
+You can also pre-warm the cache manually:
+
+```bash
+python run.py --download-demo   # fetch demo NIfTIs + params.json
+```
+
+---
+
+## Requirements
+
+- Python 3.7+, PyTorch 1.8+
+- NVIDIA GPU recommended; CPU also supported
+- MATLAB R2017b+ (for MATLAB wrappers only — not needed for web app)
+- FSL (for BET brain mask extraction, optional)
+
+Tested on: Windows 11 (RTX 4090 / A4000), macOS (M1 Pro Max), CentOS 7.8 (Tesla V100).
+
+---
+
 ## Quick Start – No MATLAB Required (Web App)
 
-iQSM+ is available as a **browser-based web app** — no MATLAB, no command line needed.
+iQSM+ is available as a **browser-based web app** — no MATLAB, no command line needed. Pretrained checkpoints and demo data download automatically on first use.
 
 ### Option A – Docker (recommended)
 
@@ -71,19 +102,32 @@ python app.py
 - Upload phase NIfTI (`.nii` / `.nii.gz`) or DICOM
 - Echo times auto-extracted from DICOM headers
 - Optionally upload magnitude and brain mask
-- Click **Run Reconstruction**
+- Click **⬇ Load Demo Data** to auto-fill all fields with the demo dataset
+- Click **▶ Run Reconstruction** to process
 - Download QSM result NIfTI — view in FSLeyes / ITK-SNAP / 3D Slicer
 
 ---
 
-## Requirements
+## Quick Start — Command Line
 
-- Python 3.7+, PyTorch 1.8+
-- NVIDIA GPU recommended (CPU also supported)
-- MATLAB R2017b+ (for MATLAB wrappers only — not needed for web app)
-- FSL (for BET brain mask extraction, optional)
+```bash
+# First time: download demo data and see how to run it
+python run.py --download-demo
 
-Tested on: Windows 11 (RTX 4090 / A4000), macOS (M1 Pro Max), CentOS 7.8 (Tesla V100).
+# Single-echo
+python run.py --phase ph.nii.gz --te 0.020 --mask mask.nii.gz
+
+# Multi-echo
+python run.py --phase ph.nii.gz --te 0.0032 0.0065 0.0098 --mag mag.nii.gz
+
+# Use a config file
+python run.py --config config.yaml
+
+# All options
+python run.py --help
+```
+
+Checkpoints are downloaded automatically on first run and cached in `~/.cache/huggingface/hub/`.
 
 ---
 
@@ -100,6 +144,8 @@ conda activate iQSM_Plus
 conda install pytorch torchvision cudatoolkit=10.2 -c pytorch
 conda install scipy
 ```
+
+Checkpoints are downloaded automatically on first inference. No manual download needed.
 
 ### Run reconstruction (MATLAB)
 
