@@ -402,7 +402,7 @@ _CSS = """
 }
 
 /* ── Preview images ──────────────────────────────────────────── */
-#preview-row .image-container { border-radius: 6px !important; overflow: hidden !important; }
+#preview-row .image-container { border-radius: 6px !important; }
 
 /* ── Footer ──────────────────────────────────────────────────── */
 .app-footer {
