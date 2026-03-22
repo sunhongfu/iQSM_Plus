@@ -446,7 +446,7 @@ _THEME = gr.themes.Default(
     font_mono=["ui-monospace", "SFMono-Regular", "Menlo", "monospace"],
     primary_hue=gr.themes.colors.blue,
     neutral_hue=gr.themes.colors.slate,
-    radius_size=gr.themes.sizes.md,
+    radius_size=gr.themes.sizes.sm,
 )
 
 TITLE = "iQSM+ — Quantitative Susceptibility Mapping"
