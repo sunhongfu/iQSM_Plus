@@ -175,35 +175,36 @@ _DISPLAY_VMIN = -0.2   # ppm
 _DISPLAY_VMAX =  0.2   # ppm
 
 
-def _make_slice_figure(nii_path: str):
+def _make_slice_figure(nii_path: str, vmin: float, vmax: float):
+    """Render axial/coronal/sagittal middle slices; return PNG file paths."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
     vol = nib.load(nii_path).get_fdata(dtype=np.float32)
-    vol_n = np.clip((vol - _DISPLAY_VMIN) / (_DISPLAY_VMAX - _DISPLAY_VMIN), 0, 1)
 
     raw_slices = [
-        vol_n[:, :, vol_n.shape[2] // 2].T,
-        vol_n[:, vol_n.shape[1] // 2, :].T,
-        vol_n[vol_n.shape[0] // 2, :, :].T,
+        vol[:, :, vol.shape[2] // 2].T,
+        vol[:, vol.shape[1] // 2, :].T,
+        vol[vol.shape[0] // 2, :, :].T,
     ]
 
-    imgs = []
-    for sl in raw_slices:
-        fig, ax = plt.subplots(figsize=(3.5, 3.5), dpi=110)
-        ax.imshow(sl, cmap="gray", origin="lower", aspect="equal", vmin=0, vmax=1)
+    out_dir = tempfile.mkdtemp(prefix="iqsm_preview_")
+    paths = []
+    for i, sl in enumerate(raw_slices):
+        fig, ax = plt.subplots(figsize=(4, 4), dpi=120)
+        ax.imshow(sl, cmap="gray", origin="lower", aspect="equal", vmin=vmin, vmax=vmax)
         ax.axis("off")
         fig.patch.set_facecolor("#111827")
         ax.set_facecolor("#111827")
-        fig.tight_layout(pad=0)
-        fig.canvas.draw()
-        w, h = fig.canvas.get_width_height()
-        buf = np.frombuffer(fig.canvas.buffer_rgba(), dtype=np.uint8).reshape(h, w, 4)
-        imgs.append(buf[:, :, :3].copy())
+        plt.subplots_adjust(left=0, right=1, top=1, bottom=0)
+        path = os.path.join(out_dir, f"slice_{i}.png")
+        fig.savefig(path, dpi=120, bbox_inches="tight", pad_inches=0,
+                    facecolor="#111827")
         plt.close(fig)
+        paths.append(path)
 
-    return imgs[0], imgs[1], imgs[2]
+    return paths[0], paths[1], paths[2]
 
 
 # ---------------------------------------------------------------------------
@@ -312,7 +313,7 @@ def reconstruct(
         )
 
     try:
-        ax_img, cor_img, sag_img = _make_slice_figure(out_path)
+        ax_img, cor_img, sag_img = _make_slice_figure(out_path, _DISPLAY_VMIN, _DISPLAY_VMAX)
     except Exception:
         ax_img = cor_img = sag_img = None
 
@@ -491,30 +492,29 @@ def build_ui():
                          "(veins appear bright in the QSM output).",
                 )
 
-                with gr.Accordion("Advanced options", open=False):
-                    mask_file = gr.File(
-                        label="Brain mask NIfTI (optional — full volume used if omitted)",
-                        file_types=[".nii", ".gz"],
+                mask_file = gr.File(
+                    label="Brain mask NIfTI (optional — full volume used if omitted)",
+                    file_types=[".nii", ".gz"],
+                )
+                with gr.Row():
+                    b0_val = gr.Number(
+                        label="B0 field strength (Tesla)",
+                        value=3.0, minimum=0.1, maximum=14.0, step=0.5,
                     )
-                    with gr.Row():
-                        b0_val = gr.Number(
-                            label="B0 field strength (Tesla)",
-                            value=3.0, minimum=0.1, maximum=14.0, step=0.5,
-                        )
-                        eroded_rad = gr.Slider(
-                            label="Mask erosion (voxels)",
-                            minimum=0, maximum=10, step=1, value=3,
-                        )
-                    voxel_str = gr.Textbox(
-                        label="Voxel size — x y z (mm)",
-                        placeholder="e.g.  1 1 2",
-                        info="Auto-filled from file header. Override if the values look wrong.",
+                    eroded_rad = gr.Slider(
+                        label="Mask erosion (voxels)",
+                        minimum=0, maximum=10, step=1, value=3,
                     )
-                    b0dir_str = gr.Textbox(
-                        label="B0 direction override (optional)",
-                        placeholder="e.g.  0 0 1",
-                        info="Unit vector of B0 field direction. Leave blank to use [0 0 1] (axial).",
-                    )
+                voxel_str = gr.Textbox(
+                    label="Voxel size — x y z (mm)",
+                    placeholder="e.g.  1 1 2",
+                    info="Auto-filled from file header. Override if the values look wrong.",
+                )
+                b0dir_str = gr.Textbox(
+                    label="B0 direction override (optional)",
+                    placeholder="e.g.  0 0 1",
+                    info="Unit vector of B0 field direction. Leave blank to use [0 0 1] (axial).",
+                )
 
                 with gr.Row():
                     run_btn  = gr.Button(
