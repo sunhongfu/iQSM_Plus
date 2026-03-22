@@ -1,8 +1,8 @@
 """
 iQSM+ – Command-line interface
 
-Setup (first time):
-    python run.py --download-demo           # fetch demo NIfTIs  → demo/
+Setup (first time — pre-warms the Hugging Face cache):
+    python run.py --download-demo           # fetch demo NIfTIs
 
 Run:
     python run.py --config config.yaml
@@ -10,53 +10,49 @@ Run:
     python run.py --phase ph.nii.gz --te 0.0032 0.0065 0.0098 --mag mag.nii.gz
     python run.py --config config.yaml --output ./other/   # CLI overrides config
     python run.py --help
+
+Files are cached automatically by huggingface_hub (~/.cache/huggingface/hub/).
+Checkpoints are bundled in the repo — no separate download needed.
 """
 
 import argparse
-import os
-import urllib.request
 
 import yaml
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
+_HF_REPO = "sunhongfu/iQSM_Plus"
+
+_DEMO_FILES = [
+    "demo/ph_multi_echo.nii.gz",
+    "demo/mag_multi_echo.nii.gz",
+    "demo/mask_multi_echo.nii.gz",
+]
+
 
 # ---------------------------------------------------------------------------
 # Download helpers
 # ---------------------------------------------------------------------------
 
-_DEMO_DIR  = os.path.join(_HERE, "demo")
-
-_DEMO_BASE = "https://github.com/sunhongfu/iQSM_Plus/releases/download/v1.0-demo"
-_DEMO_TE   = [0.0032, 0.0065, 0.0098, 0.0131, 0.0164, 0.0197, 0.0231, 0.0264]
-_DEMO_FILES = {
-    "ph_multi_echo.nii.gz":   f"{_DEMO_BASE}/ph_multi_echo.nii.gz",
-    "mag_multi_echo.nii.gz":  f"{_DEMO_BASE}/mag_multi_echo.nii.gz",
-    "mask_multi_echo.nii.gz": f"{_DEMO_BASE}/mask_multi_echo.nii.gz",
-}
-
-
-def _download(files: dict, dest_dir: str):
-    os.makedirs(dest_dir, exist_ok=True)
-    for name, url in files.items():
-        dest = os.path.join(dest_dir, name)
-        if os.path.exists(dest):
-            print(f"  {name}  (already downloaded)")
-        else:
-            print(f"  {name}  downloading …", end=" ", flush=True)
-            urllib.request.urlretrieve(url, dest)
-            size = os.path.getsize(dest)
-            print(f"done ({size / 1024 / 1024:.1f} MB)")
+def _hf_pull(filenames: list[str]) -> dict[str, str]:
+    """Download files from HF Hub (cached after first run). Returns {filename: local_path}."""
+    from huggingface_hub import hf_hub_download
+    paths = {}
+    for filename in filenames:
+        print(f"  {filename} …", end=" ", flush=True)
+        path = hf_hub_download(repo_id=_HF_REPO, filename=filename)
+        print(f"ok  →  {path}")
+        paths[filename] = path
+    return paths
 
 
 def cmd_download_demo():
-    print(f"Downloading demo data → {_DEMO_DIR}/")
-    _download(_DEMO_FILES, _DEMO_DIR)
-    phase = os.path.join(_DEMO_DIR, "ph_multi_echo.nii.gz")
-    mag   = os.path.join(_DEMO_DIR, "mag_multi_echo.nii.gz")
-    mask  = os.path.join(_DEMO_DIR, "mask_multi_echo.nii.gz")
-    te_str = " ".join(f"{te:.4g}" for te in _DEMO_TE)
+    print(f"Fetching demo data from huggingface.co/{_HF_REPO} …")
+    paths = _hf_pull(_DEMO_FILES)
+    phase = paths["demo/ph_multi_echo.nii.gz"]
+    mag   = paths["demo/mag_multi_echo.nii.gz"]
+    mask  = paths["demo/mask_multi_echo.nii.gz"]
+    te_str = "0.0032 0.0065 0.0098 0.0131 0.0164 0.0197 0.0231 0.0264"
     print(f"""
-Demo dataset: multi-echo in-vivo brain (64×64×32 crop), 1×1×1 mm, 8 echoes, B0=3T
+Demo dataset: multi-echo in-vivo brain, 1×1×1 mm, 8 echoes, B0=3T
 
 To run reconstruction on this data:
 
@@ -107,7 +103,7 @@ def main():
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument("--download-demo", action="store_true",
-                        help="Download demo NIfTIs to demo/ and show how to run them.")
+                        help="Pre-warm HF cache with demo NIfTIs and show how to run them.")
     parser.add_argument("--config",     metavar="FILE",
                         help="YAML config file. CLI arguments override config values.")
     parser.add_argument("--phase",      metavar="FILE",

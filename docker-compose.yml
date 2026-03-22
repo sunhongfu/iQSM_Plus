@@ -12,6 +12,10 @@
 #   docker compose up
 #   → open http://localhost:7860
 #
+# Model checkpoints and demo data are downloaded automatically from
+# Hugging Face Hub (huggingface.co/sunhongfu/iQSM_Plus) and cached in
+# the named volume 'hf-cache', which persists across container restarts.
+#
 # NVIDIA GPU (Linux only):
 #   1. Install NVIDIA Container Toolkit
 #      https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html
@@ -33,10 +37,8 @@ services:
     ports:
       - "7860:7860"
     volumes:
-      # QSM outputs are saved here on your host machine
       - ./outputs:/tmp/iqsm_outputs
-      - ./demo:/iQSM_Plus/demo          # demo NIfTIs — persists across restarts
-    restart: unless-stopped
+      - hf-cache:/root/.cache/huggingface   # checkpoints + demo data persist here
 
     # ── NVIDIA GPU – uncomment the block below for Linux + NVIDIA GPU ─────────
     # Also change TORCH_VARIANT above to cu121 and rebuild.
@@ -50,3 +52,6 @@ services:
     #         - driver: nvidia
     #           count: 1
     #           capabilities: [gpu]
+
+volumes:
+  hf-cache:

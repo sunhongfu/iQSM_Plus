@@ -23,10 +23,13 @@ _INFERENCE_DIR = os.path.join(
     _HERE,
     "PythonCodes", "Evaluation", "iQSM_series", "iQSM_plus_v1",
 )
-CHECKPOINTS_DIR = os.path.join(
-    _HERE,
-    "PythonCodes", "Evaluation", "checkpoints", "iQSM_plus_v1",
-)
+_HF_REPO = "sunhongfu/iQSM_Plus"
+
+
+def _ckpt(filename: str) -> str:
+    """Return local path to a checkpoint, downloading from HF Hub if needed."""
+    from huggingface_hub import hf_hub_download
+    return hf_hub_download(repo_id=_HF_REPO, filename=filename)
 
 if _INFERENCE_DIR not in sys.path:
     sys.path.insert(0, _INFERENCE_DIR)
@@ -65,10 +68,7 @@ def get_model(device: torch.device) -> nn.Module:
     lot_layer = LoTLayer(conv_op)
     lot_layer = nn.DataParallel(lot_layer)
     lot_layer.load_state_dict(
-        torch.load(
-            os.path.join(CHECKPOINTS_DIR, "LoTLayer_chi.pth"),
-            map_location=device,
-        )
+        torch.load(_ckpt("LoTLayer_chi.pth"), map_location=device)
     )
     lot_layer = lot_layer.module
     lot_layer.eval()
@@ -76,10 +76,7 @@ def get_model(device: torch.device) -> nn.Module:
     unet = Unet(4, 16, 1)
     unet = nn.DataParallel(unet)
     unet.load_state_dict(
-        torch.load(
-            os.path.join(CHECKPOINTS_DIR, "iQSM_plus.pth"),
-            map_location=device,
-        )
+        torch.load(_ckpt("iQSM_plus.pth"), map_location=device)
     )
     unet = unet.module
     unet.eval()

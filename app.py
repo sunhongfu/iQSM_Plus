@@ -15,7 +15,6 @@ import os
 import re
 import tempfile
 import traceback
-import urllib.request
 
 import gradio as gr
 import nibabel as nib
@@ -27,12 +26,7 @@ from inference import run_iqsm_plus
 # ---------------------------------------------------------------------------
 # Demo data – multi-echo in-vivo brain, 1×1×1 mm, B0=3T, 8 echoes
 # ---------------------------------------------------------------------------
-_DEMO_BASE = "https://github.com/sunhongfu/iQSM_Plus/releases/download/v1.0-demo"
-_DEMO_PHASE = f"{_DEMO_BASE}/ph_multi_echo.nii.gz"
-_DEMO_MAG   = f"{_DEMO_BASE}/mag_multi_echo.nii.gz"
-_DEMO_MASK  = f"{_DEMO_BASE}/mask_multi_echo.nii.gz"
-_DEMO_CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "demo")
-
+_HF_REPO         = "sunhongfu/iQSM_Plus"
 _DEMO_TE         = [0.0032, 0.0065, 0.0098, 0.0131, 0.0164, 0.0197, 0.0231, 0.0264]
 _DEMO_B0         = 3.0
 _DEMO_VOX        = "1 1 1"
@@ -42,25 +36,16 @@ _DEMO_PHASE_SIGN = False
 
 
 def _download_demo() -> tuple[str, str, str]:
-    os.makedirs(_DEMO_CACHE_DIR, exist_ok=True)
-    phase_path = os.path.join(_DEMO_CACHE_DIR, "ph_multi_echo.nii.gz")
-    mag_path   = os.path.join(_DEMO_CACHE_DIR, "mag_multi_echo.nii.gz")
-    mask_path  = os.path.join(_DEMO_CACHE_DIR, "mask_multi_echo.nii.gz")
-
-    for url, path in [
-        (_DEMO_PHASE, phase_path),
-        (_DEMO_MAG,   mag_path),
-        (_DEMO_MASK,  mask_path),
-    ]:
-        if not os.path.exists(path):
-            print(f"Downloading demo file: {url}")
-            try:
-                urllib.request.urlretrieve(url, path)
-            except Exception as exc:
-                raise gr.Error(
-                    f"Could not download demo data from GitHub Releases.\n{exc}\n\n"
-                    "Please upload your own phase NIfTI file instead."
-                )
+    from huggingface_hub import hf_hub_download
+    try:
+        phase_path = hf_hub_download(repo_id=_HF_REPO, filename="demo/ph_multi_echo.nii.gz")
+        mag_path   = hf_hub_download(repo_id=_HF_REPO, filename="demo/mag_multi_echo.nii.gz")
+        mask_path  = hf_hub_download(repo_id=_HF_REPO, filename="demo/mask_multi_echo.nii.gz")
+    except Exception as exc:
+        raise gr.Error(
+            f"Could not download demo data from Hugging Face.\n{exc}\n\n"
+            "Please upload your own phase NIfTI file instead."
+        )
     return phase_path, mag_path, mask_path
 
 
@@ -76,11 +61,11 @@ def load_demo_data(progress=gr.Progress(track_tqdm=True)):
 
     te_str = ", ".join(f"{te:.4g}" for te in _DEMO_TE)
     demo_info = (
-        f"Cached at: {_DEMO_CACHE_DIR}\n"
-        f"  ph_multi_echo.nii.gz    (phase, 4D)\n"
-        f"  mag_multi_echo.nii.gz   (magnitude, 4D)\n"
-        f"  mask_multi_echo.nii.gz  (mask)\n"
-        f"Parameters: 64×64×32 crop · 1×1×1 mm · 8 echoes · B0 = 3 T\n"
+        f"HF Hub: {_HF_REPO}\n"
+        f"  demo/ph_multi_echo.nii.gz    (phase, 4D)\n"
+        f"  demo/mag_multi_echo.nii.gz   (magnitude, 4D)\n"
+        f"  demo/mask_multi_echo.nii.gz  (mask)\n"
+        f"Parameters: 1×1×1 mm · 8 echoes · B0 = 3 T\n"
         f"Ready — click ▶ Run Reconstruction to proceed."
     )
 

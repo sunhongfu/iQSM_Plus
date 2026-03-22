@@ -14,3 +14,4 @@ nibabel>=5.0
 matplotlib>=3.7
 gradio>=4.0
 pydicom>=2.3
+huggingface_hub>=0.20
