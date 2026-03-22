@@ -609,8 +609,5 @@ if __name__ == "__main__":
         server_name=args.server_name,
         server_port=args.server_port,
         show_error=True,
-        allowed_paths=[
-            tempfile.gettempdir(),
-            os.path.expanduser("~/.cache/huggingface"),
-        ],
+        allowed_paths=[tempfile.gettempdir(), _DEMO_DIR],
     )

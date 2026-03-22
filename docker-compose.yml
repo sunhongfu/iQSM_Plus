@@ -8,18 +8,27 @@
 #   - Linux (AMD64 or ARM64)
 #
 # Usage:
-#   docker compose build    ← first time only (downloads ~1 GB)
-#   docker compose up
-#   → open http://localhost:7860
+#   docker compose build              ← first time only
+#   docker compose up                 ← start web app at http://localhost:7860
 #
-# Model checkpoints and demo data are downloaded automatically from
-# Hugging Face Hub (huggingface.co/sunhongfu/iQSM_Plus) and cached in
-# the named volume 'hf-cache', which persists across container restarts.
+# Demo data and checkpoints are NOT bundled in the image.
+# Download them into the local folders before or after starting:
+#
+#   # On the host (if Python env is available):
+#   python run.py --download-demo
+#   python run.py --download-checkpoints
+#
+#   # Or while the container is running (no restart needed):
+#   docker compose exec iqsm-plus python run.py --download-demo
+#   docker compose exec iqsm-plus python run.py --download-checkpoints
+#
+# demo/ and checkpoints/ are bind-mounted so the container and host
+# always share the same files. Downloads are visible immediately.
 #
 # NVIDIA GPU (Linux only):
 #   1. Install NVIDIA Container Toolkit
 #      https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html
-#   2. Set TORCH_VARIANT=cu121 in the build.args below
+#   2. Set TORCH_VARIANT=cu121 in build.args below
 #   3. Uncomment the GPU block at the bottom of this file
 #   4. docker compose build && docker compose up
 # ============================================================
@@ -38,7 +47,8 @@ services:
       - "7860:7860"
     volumes:
       - ./outputs:/tmp/iqsm_outputs
-      - hf-cache:/root/.cache/huggingface   # checkpoints + demo data persist here
+      - ./demo:/iQSM_Plus/demo
+      - ./checkpoints:/iQSM_Plus/checkpoints
 
     # ── NVIDIA GPU – uncomment the block below for Linux + NVIDIA GPU ─────────
     # Also change TORCH_VARIANT above to cu121 and rebuild.
@@ -52,6 +62,3 @@ services:
     #         - driver: nvidia
     #           count: 1
     #           capabilities: [gpu]
-
-volumes:
-  hf-cache:
