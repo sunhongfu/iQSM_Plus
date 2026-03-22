@@ -52,7 +52,7 @@ def cmd_download_demo():
     mask  = paths["demo/mask_multi_echo.nii.gz"]
     te_str = "0.0032 0.0065 0.0098 0.0131 0.0164 0.0197 0.0231 0.0264"
     print(f"""
-Demo dataset: multi-echo in-vivo brain, 1×1×1 mm, 8 echoes, B0=3T
+Demo dataset: multi-echo in-vivo brain, 256×256×128, 1×1×1 mm, 8 echoes, B0=3T
 
 To run reconstruction on this data:
 

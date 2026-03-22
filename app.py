@@ -65,7 +65,7 @@ def load_demo_data(progress=gr.Progress(track_tqdm=True)):
         f"  demo/ph_multi_echo.nii.gz    (phase, 4D)\n"
         f"  demo/mag_multi_echo.nii.gz   (magnitude, 4D)\n"
         f"  demo/mask_multi_echo.nii.gz  (mask)\n"
-        f"Parameters: 1×1×1 mm · 8 echoes · B0 = 3 T\n"
+        f"Parameters: 256×256×128 · 1×1×1 mm · 8 echoes · B0 = 3 T\n"
         f"Ready — click ▶ Run Reconstruction to proceed."
     )
 
