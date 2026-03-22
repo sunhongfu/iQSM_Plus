@@ -416,6 +416,9 @@ _CSS = """
 }
 .app-footer a { color: #64748b !important; text-decoration: none; }
 .app-footer a:hover { text-decoration: underline !important; }
+
+/* ── Hide Gradio share button ─────────────────────────────────── */
+.share-button { display: none !important; }
 """
 
 _THEME = gr.themes.Default(
@@ -540,9 +543,9 @@ def build_ui():
 
                 gr.HTML('<p class="sec-label" style="margin-top:14px">Preview — QSM middle slices</p>')
                 with gr.Row(elem_id="preview-row"):
-                    axial_img    = gr.Image(label="Axial",    show_label=True, height=210)
-                    coronal_img  = gr.Image(label="Coronal",  show_label=True, height=210)
-                    sagittal_img = gr.Image(label="Sagittal", show_label=True, height=210)
+                    axial_img    = gr.Image(label="Axial",    show_label=True, height=210, type="filepath")
+                    coronal_img  = gr.Image(label="Coronal",  show_label=True, height=210, type="filepath")
+                    sagittal_img = gr.Image(label="Sagittal", show_label=True, height=210, type="filepath")
 
         # ── Footer ──────────────────────────────────────────────────────
         gr.HTML("""
