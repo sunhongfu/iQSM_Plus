@@ -206,7 +206,6 @@ def _make_slice_figure(nii_path: str, vmin: float, vmax: float):
 # ---------------------------------------------------------------------------
 
 def reconstruct(
-    input_mode,
     phase_file,
     mag_file,
     phase_dcm,
@@ -222,7 +221,7 @@ def reconstruct(
 ):
     dcm_tmp = None
 
-    if input_mode == "DICOM series":
+    if phase_dcm:
         if not phase_dcm:
             raise gr.Error("Please upload phase DICOM files.")
         try:
@@ -467,13 +466,6 @@ def build_ui():
                             file_types=[".dcm", ".ima", "."],
                         )
 
-                input_mode = gr.State("NIfTI files")
-                input_tabs.change(
-                    fn=lambda tab: tab,
-                    inputs=[input_tabs],
-                    outputs=[input_mode],
-                )
-
                 te_str = gr.Textbox(
                     label="Echo time(s) — TE (seconds)",
                     placeholder="Single: 0.020   Multi: 0.004, 0.008, 0.012",
@@ -577,7 +569,6 @@ def build_ui():
         run_btn.click(
             fn=reconstruct,
             inputs=[
-                input_mode,
                 phase_file, mag_file,
                 phase_dcm, mag_dcm,
                 te_str, mask_file,
