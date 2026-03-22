@@ -1,4 +1,7 @@
-# Demo NIfTI files (large; downloaded on first use — see demo/params.json for metadata)
+# Checkpoints (downloaded from HF Hub via: python run.py --download-checkpoints)
+checkpoints/*.pth
+
+# Demo NIfTI files (downloaded from HF Hub via: python run.py --download-demo)
 demo/*.nii
 demo/*.nii.gz
 

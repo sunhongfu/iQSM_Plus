@@ -26,46 +26,32 @@ from inference import run_iqsm_plus
 # ---------------------------------------------------------------------------
 # Demo data – multi-echo in-vivo brain, 1×1×1 mm, B0=3T, 8 echoes
 # ---------------------------------------------------------------------------
-_HF_REPO = "sunhongfu/iQSM_Plus"
 _HERE     = os.path.dirname(os.path.abspath(__file__))
 _DEMO_DIR = os.path.join(_HERE, "demo")
 
-_DEMO_FILES = {
-    "ph_multi_echo.nii.gz":  "demo/ph_multi_echo.nii.gz",
-    "mag_multi_echo.nii.gz": "demo/mag_multi_echo.nii.gz",
-    "mask_multi_echo.nii.gz":"demo/mask_multi_echo.nii.gz",
-    "params.json":           "demo/params.json",
-}
 
+_DEMO_NIFTIS = ["ph_multi_echo.nii.gz", "mag_multi_echo.nii.gz", "mask_multi_echo.nii.gz"]
 
-def _ensure_demo_file(filename: str) -> str:
-    """Return local path to a demo file, downloading from HF Hub if not present."""
-    local = os.path.join(_DEMO_DIR, filename)
-    if os.path.exists(local):
-        return local
-    import shutil
-    from huggingface_hub import hf_hub_download
-    cached = hf_hub_download(repo_id=_HF_REPO, filename=_DEMO_FILES[filename])
-    os.makedirs(_DEMO_DIR, exist_ok=True)
-    shutil.copy(cached, local)
-    return local
+_DEMO_NOT_FOUND_MSG = (
+    "Demo data not found in demo/.\n\n"
+    "Run the following command first, then restart the app:\n\n"
+    "    python run.py --download-demo\n\n"
+    "Or with Docker:\n\n"
+    "    docker compose run --rm iqsm-plus python run.py --download-demo"
+)
 
 
 def _load_demo_files() -> tuple[str, str, str, dict]:
-    """Return local paths to demo NIfTIs + params, downloading from HF Hub if needed."""
+    """Load demo files from local demo/ folder. Raises gr.Error if not downloaded yet."""
     import json
-    os.makedirs(_DEMO_DIR, exist_ok=True)
-    try:
-        phase_path  = _ensure_demo_file("ph_multi_echo.nii.gz")
-        mag_path    = _ensure_demo_file("mag_multi_echo.nii.gz")
-        mask_path   = _ensure_demo_file("mask_multi_echo.nii.gz")
-        params_path = _ensure_demo_file("params.json")
-    except Exception as exc:
-        raise gr.Error(
-            f"Could not load demo data.\n{exc}\n\n"
-            "Please upload your own phase NIfTI file instead."
-        )
-    with open(params_path) as f:
+    missing = [f for f in _DEMO_NIFTIS + ["params.json"]
+               if not os.path.exists(os.path.join(_DEMO_DIR, f))]
+    if missing:
+        raise gr.Error(_DEMO_NOT_FOUND_MSG)
+    phase_path  = os.path.join(_DEMO_DIR, "ph_multi_echo.nii.gz")
+    mag_path    = os.path.join(_DEMO_DIR, "mag_multi_echo.nii.gz")
+    mask_path   = os.path.join(_DEMO_DIR, "mask_multi_echo.nii.gz")
+    with open(os.path.join(_DEMO_DIR, "params.json")) as f:
         params = json.load(f)
     return phase_path, mag_path, mask_path, params
 

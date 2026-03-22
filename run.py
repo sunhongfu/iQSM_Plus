@@ -1,8 +1,9 @@
 """
 iQSM+ – Command-line interface
 
-Setup (first time — downloads demo NIfTIs into demo/):
-    python run.py --download-demo
+First-time setup (download data and checkpoints into local folders):
+    python run.py --download-demo           # → demo/
+    python run.py --download-checkpoints    # → checkpoints/
 
 Run:
     python run.py --config config.yaml
@@ -10,9 +11,6 @@ Run:
     python run.py --phase ph.nii.gz --te 0.0032 0.0065 0.0098 --mag mag.nii.gz
     python run.py --config config.yaml --output ./other/   # CLI overrides config
     python run.py --help
-
-Checkpoints are stored in checkpoints/ (downloaded from Hugging Face on first use).
-Demo data is stored in demo/ (downloaded on first use or via --download-demo).
 """
 
 import argparse
@@ -20,9 +18,10 @@ import os
 
 import yaml
 
-_HF_REPO  = "sunhongfu/iQSM_Plus"
-_HERE     = os.path.dirname(os.path.abspath(__file__))
-_DEMO_DIR = os.path.join(_HERE, "demo")
+_HF_REPO      = "sunhongfu/iQSM_Plus"
+_HERE         = os.path.dirname(os.path.abspath(__file__))
+_DEMO_DIR     = os.path.join(_HERE, "demo")
+_CKPT_DIR     = os.path.join(_HERE, "checkpoints")
 
 _DEMO_FILENAMES = [
     "ph_multi_echo.nii.gz",
@@ -30,35 +29,38 @@ _DEMO_FILENAMES = [
     "mask_multi_echo.nii.gz",
     "params.json",
 ]
+_CKPT_FILENAMES = [
+    "iQSM_plus.pth",
+    "LoTLayer_chi.pth",
+]
 
 
 # ---------------------------------------------------------------------------
 # Download helpers
 # ---------------------------------------------------------------------------
 
-def _ensure_local(filename: str, hf_path: str, local_dir: str) -> str:
-    """Return local path to file, downloading from HF Hub into local_dir if absent."""
+def _download_to(filename: str, hf_path: str, local_dir: str) -> str:
+    """Download a file from HF Hub into local_dir. Returns local path."""
+    import shutil
+    from huggingface_hub import hf_hub_download
     local = os.path.join(local_dir, filename)
-    if not os.path.exists(local):
-        import shutil
-        from huggingface_hub import hf_hub_download
-        print(f"  {filename} …", end=" ", flush=True)
-        cached = hf_hub_download(repo_id=_HF_REPO, filename=hf_path)
-        os.makedirs(local_dir, exist_ok=True)
-        shutil.copy(cached, local)
-        print(f"ok  →  {local}")
+    print(f"  {filename} …", end=" ", flush=True)
+    cached = hf_hub_download(repo_id=_HF_REPO, filename=hf_path)
+    os.makedirs(local_dir, exist_ok=True)
+    shutil.copy(cached, local)
+    print(f"ok  →  {local}")
     return local
 
 
 def cmd_download_demo():
     import json
     print(f"Fetching demo data from huggingface.co/{_HF_REPO} → {_DEMO_DIR}/")
-    os.makedirs(_DEMO_DIR, exist_ok=True)
     for name in _DEMO_FILENAMES:
-        _ensure_local(name, f"demo/{name}", _DEMO_DIR)
-    phase = os.path.join(_DEMO_DIR, "ph_multi_echo.nii.gz")
-    mag   = os.path.join(_DEMO_DIR, "mag_multi_echo.nii.gz")
-    mask  = os.path.join(_DEMO_DIR, "mask_multi_echo.nii.gz")
+        local = os.path.join(_DEMO_DIR, name)
+        if os.path.exists(local):
+            print(f"  {name} already present, skipping.")
+        else:
+            _download_to(name, f"demo/{name}", _DEMO_DIR)
     with open(os.path.join(_DEMO_DIR, "params.json")) as f:
         p = json.load(f)
     te     = p["TE_seconds"]
@@ -69,6 +71,9 @@ def cmd_download_demo():
     mat    = "×".join(str(x) for x in p.get("matrix_size", []))
     te_str  = str(te) if isinstance(te, (int, float)) else " ".join(f"{v:.4g}" for v in te)
     vox_str = " ".join(str(v) for v in vox)
+    phase   = os.path.join(_DEMO_DIR, "ph_multi_echo.nii.gz")
+    mag     = os.path.join(_DEMO_DIR, "mag_multi_echo.nii.gz")
+    mask    = os.path.join(_DEMO_DIR, "mask_multi_echo.nii.gz")
     print(f"""
 Demo dataset: {p.get("description", "")}
   Matrix:  {mat}
@@ -95,6 +100,17 @@ Or copy config.yaml, fill in the paths above, and run:
 """)
 
 
+def cmd_download_checkpoints():
+    print(f"Fetching model checkpoints from huggingface.co/{_HF_REPO} → {_CKPT_DIR}/")
+    for name in _CKPT_FILENAMES:
+        local = os.path.join(_CKPT_DIR, name)
+        if os.path.exists(local):
+            print(f"  {name} already present, skipping.")
+        else:
+            _download_to(name, name, _CKPT_DIR)
+    print("\nCheckpoints ready.\n")
+
+
 # ---------------------------------------------------------------------------
 # Config loader
 # ---------------------------------------------------------------------------
@@ -109,14 +125,18 @@ def _load_config(path: str) -> dict:
 # ---------------------------------------------------------------------------
 
 def main():
-    # Pre-parse action flags before building the full parser.
     pre = argparse.ArgumentParser(add_help=False)
-    pre.add_argument("--download-demo", action="store_true")
+    pre.add_argument("--download-demo",        action="store_true")
+    pre.add_argument("--download-checkpoints", action="store_true")
     pre.add_argument("--config", metavar="FILE")
     known, _ = pre.parse_known_args()
 
     if known.download_demo:
         cmd_download_demo()
+        return
+
+    if known.download_checkpoints:
+        cmd_download_checkpoints()
         return
 
     config = _load_config(known.config) if known.config else {}
@@ -125,8 +145,10 @@ def main():
         description="iQSM+: QSM reconstruction from single- or multi-echo MRI phase.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument("--download-demo", action="store_true",
-                        help="Pre-warm HF cache with demo NIfTIs and show how to run them.")
+    parser.add_argument("--download-demo",        action="store_true",
+                        help="Download demo NIfTIs into demo/ and show run command.")
+    parser.add_argument("--download-checkpoints", action="store_true",
+                        help="Download model checkpoints into checkpoints/.")
     parser.add_argument("--config",     metavar="FILE",
                         help="YAML config file. CLI arguments override config values.")
     parser.add_argument("--phase",      metavar="FILE",
