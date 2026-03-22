@@ -6,7 +6,6 @@ so the tool runs without any MATLAB dependency.
 """
 
 import os
-import sys
 import tempfile
 
 import numpy as np
@@ -19,23 +18,25 @@ from scipy.ndimage import zoom, binary_erosion
 # Locate model code and checkpoints
 # ---------------------------------------------------------------------------
 _HERE = os.path.dirname(os.path.abspath(__file__))  # iQSM_Plus/
-_INFERENCE_DIR = os.path.join(
-    _HERE,
-    "PythonCodes", "Evaluation", "iQSM_series", "iQSM_plus_v1",
-)
+_CKPT_DIR = os.path.join(_HERE, "checkpoints")
 _HF_REPO = "sunhongfu/iQSM_Plus"
+
+from models.lot_unet import LoT_Unet, LoTLayer  # noqa: E402
+from models.unet import Unet  # noqa: E402
 
 
 def _ckpt(filename: str) -> str:
-    """Return local path to a checkpoint, downloading from HF Hub if needed."""
+    """Return local path to a checkpoint, downloading from HF Hub if not present."""
+    local = os.path.join(_CKPT_DIR, filename)
+    if os.path.exists(local):
+        return local
+    print(f"  Downloading checkpoint {filename} …", flush=True)
     from huggingface_hub import hf_hub_download
-    return hf_hub_download(repo_id=_HF_REPO, filename=filename)
-
-if _INFERENCE_DIR not in sys.path:
-    sys.path.insert(0, _INFERENCE_DIR)
-
-from LoT_Unet_plus import LoT_Unet, LoTLayer  # noqa: E402 (after sys.path edit)
-from Unet import Unet  # noqa: E402
+    import shutil
+    cached = hf_hub_download(repo_id=_HF_REPO, filename=filename)
+    os.makedirs(_CKPT_DIR, exist_ok=True)
+    shutil.copy(cached, local)
+    return local
 
 
 # ---------------------------------------------------------------------------

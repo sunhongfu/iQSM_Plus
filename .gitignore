@@ -1,3 +1,20 @@
+# Demo NIfTI files (large; downloaded on first use — see demo/params.json for metadata)
+demo/*.nii
+demo/*.nii.gz
 
-# Downloaded demo data
-demo/
+# Output files
+outputs/
+*.nii
+*.nii.gz
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Environments
+.env
+*.egg-info/
+dist/
+build/

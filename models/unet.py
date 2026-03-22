@@ -6,7 +6,7 @@
 ## -defined packages here.
 ## import self-defined packages
 import torch.nn.functional as F
-from Unet_blocks import * 
+from .unet_blocks import * 
 ################# End Section 1 ##########################
 
 #################### Section 2 ###########################

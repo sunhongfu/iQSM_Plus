@@ -1,8 +1,8 @@
 """
 iQSM+ – Command-line interface
 
-Setup (first time — pre-warms the Hugging Face cache):
-    python run.py --download-demo           # fetch demo NIfTIs
+Setup (first time — downloads demo NIfTIs into demo/):
+    python run.py --download-demo
 
 Run:
     python run.py --config config.yaml
@@ -11,20 +11,24 @@ Run:
     python run.py --config config.yaml --output ./other/   # CLI overrides config
     python run.py --help
 
-Files are cached automatically by huggingface_hub (~/.cache/huggingface/hub/).
-Checkpoints are bundled in the repo — no separate download needed.
+Checkpoints are stored in checkpoints/ (downloaded from Hugging Face on first use).
+Demo data is stored in demo/ (downloaded on first use or via --download-demo).
 """
 
 import argparse
+import os
 
 import yaml
 
-_HF_REPO = "sunhongfu/iQSM_Plus"
+_HF_REPO  = "sunhongfu/iQSM_Plus"
+_HERE     = os.path.dirname(os.path.abspath(__file__))
+_DEMO_DIR = os.path.join(_HERE, "demo")
 
-_DEMO_FILES = [
-    "demo/ph_multi_echo.nii.gz",
-    "demo/mag_multi_echo.nii.gz",
-    "demo/mask_multi_echo.nii.gz",
+_DEMO_FILENAMES = [
+    "ph_multi_echo.nii.gz",
+    "mag_multi_echo.nii.gz",
+    "mask_multi_echo.nii.gz",
+    "params.json",
 ]
 
 
@@ -32,26 +36,30 @@ _DEMO_FILES = [
 # Download helpers
 # ---------------------------------------------------------------------------
 
-def _hf_pull(filenames: list[str]) -> dict[str, str]:
-    """Download files from HF Hub (cached after first run). Returns {filename: local_path}."""
-    from huggingface_hub import hf_hub_download
-    paths = {}
-    for filename in filenames:
+def _ensure_local(filename: str, hf_path: str, local_dir: str) -> str:
+    """Return local path to file, downloading from HF Hub into local_dir if absent."""
+    local = os.path.join(local_dir, filename)
+    if not os.path.exists(local):
+        import shutil
+        from huggingface_hub import hf_hub_download
         print(f"  {filename} …", end=" ", flush=True)
-        path = hf_hub_download(repo_id=_HF_REPO, filename=filename)
-        print(f"ok  →  {path}")
-        paths[filename] = path
-    return paths
+        cached = hf_hub_download(repo_id=_HF_REPO, filename=hf_path)
+        os.makedirs(local_dir, exist_ok=True)
+        shutil.copy(cached, local)
+        print(f"ok  →  {local}")
+    return local
 
 
 def cmd_download_demo():
     import json
-    print(f"Fetching demo data from huggingface.co/{_HF_REPO} …")
-    paths = _hf_pull(_DEMO_FILES + ["demo/params.json"])
-    phase = paths["demo/ph_multi_echo.nii.gz"]
-    mag   = paths["demo/mag_multi_echo.nii.gz"]
-    mask  = paths["demo/mask_multi_echo.nii.gz"]
-    with open(paths["demo/params.json"]) as f:
+    print(f"Fetching demo data from huggingface.co/{_HF_REPO} → {_DEMO_DIR}/")
+    os.makedirs(_DEMO_DIR, exist_ok=True)
+    for name in _DEMO_FILENAMES:
+        _ensure_local(name, f"demo/{name}", _DEMO_DIR)
+    phase = os.path.join(_DEMO_DIR, "ph_multi_echo.nii.gz")
+    mag   = os.path.join(_DEMO_DIR, "mag_multi_echo.nii.gz")
+    mask  = os.path.join(_DEMO_DIR, "mask_multi_echo.nii.gz")
+    with open(os.path.join(_DEMO_DIR, "params.json")) as f:
         p = json.load(f)
     te     = p["TE_seconds"]
     vox    = p["voxel_size_mm"]

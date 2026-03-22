@@ -1,0 +1,36 @@
+{
+  "description": "Multi-echo in-vivo human brain QSM demo dataset",
+  "modality": "MRI",
+  "contrast": "multi-echo GRE phase and magnitude",
+  "subject": "healthy adult volunteer",
+  "scanner": "3T clinical MRI",
+  "B0_Tesla": 3.0,
+  "TE_seconds": [
+    0.0032,
+    0.0065,
+    0.0098,
+    0.0131,
+    0.0164,
+    0.0197,
+    0.0231,
+    0.0264
+  ],
+  "num_echoes": 8,
+  "voxel_size_mm": [
+    1.0,
+    1.0,
+    1.0
+  ],
+  "matrix_size": [
+    256,
+    256,
+    128
+  ],
+  "phase_sign_convention": -1,
+  "eroded_rad": 0,
+  "files": {
+    "ph_multi_echo.nii.gz": "wrapped phase image, 4D (x, y, z, echo)",
+    "mag_multi_echo.nii.gz": "magnitude image, 4D (x, y, z, echo)",
+    "mask_multi_echo.nii.gz": "brain mask (binary)"
+  }
+}

@@ -27,20 +27,42 @@ from inference import run_iqsm_plus
 # Demo data – multi-echo in-vivo brain, 1×1×1 mm, B0=3T, 8 echoes
 # ---------------------------------------------------------------------------
 _HF_REPO = "sunhongfu/iQSM_Plus"
+_HERE     = os.path.dirname(os.path.abspath(__file__))
+_DEMO_DIR = os.path.join(_HERE, "demo")
+
+_DEMO_FILES = {
+    "ph_multi_echo.nii.gz":  "demo/ph_multi_echo.nii.gz",
+    "mag_multi_echo.nii.gz": "demo/mag_multi_echo.nii.gz",
+    "mask_multi_echo.nii.gz":"demo/mask_multi_echo.nii.gz",
+    "params.json":           "demo/params.json",
+}
+
+
+def _ensure_demo_file(filename: str) -> str:
+    """Return local path to a demo file, downloading from HF Hub if not present."""
+    local = os.path.join(_DEMO_DIR, filename)
+    if os.path.exists(local):
+        return local
+    import shutil
+    from huggingface_hub import hf_hub_download
+    cached = hf_hub_download(repo_id=_HF_REPO, filename=_DEMO_FILES[filename])
+    os.makedirs(_DEMO_DIR, exist_ok=True)
+    shutil.copy(cached, local)
+    return local
 
 
 def _load_demo_files() -> tuple[str, str, str, dict]:
-    """Download demo NIfTIs + params.json from HF Hub. Returns (phase, mag, mask, params)."""
+    """Return local paths to demo NIfTIs + params, downloading from HF Hub if needed."""
     import json
-    from huggingface_hub import hf_hub_download
+    os.makedirs(_DEMO_DIR, exist_ok=True)
     try:
-        phase_path  = hf_hub_download(repo_id=_HF_REPO, filename="demo/ph_multi_echo.nii.gz")
-        mag_path    = hf_hub_download(repo_id=_HF_REPO, filename="demo/mag_multi_echo.nii.gz")
-        mask_path   = hf_hub_download(repo_id=_HF_REPO, filename="demo/mask_multi_echo.nii.gz")
-        params_path = hf_hub_download(repo_id=_HF_REPO, filename="demo/params.json")
+        phase_path  = _ensure_demo_file("ph_multi_echo.nii.gz")
+        mag_path    = _ensure_demo_file("mag_multi_echo.nii.gz")
+        mask_path   = _ensure_demo_file("mask_multi_echo.nii.gz")
+        params_path = _ensure_demo_file("params.json")
     except Exception as exc:
         raise gr.Error(
-            f"Could not download demo data from Hugging Face.\n{exc}\n\n"
+            f"Could not load demo data.\n{exc}\n\n"
             "Please upload your own phase NIfTI file instead."
         )
     with open(params_path) as f:
