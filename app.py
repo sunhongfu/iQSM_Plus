@@ -3,7 +3,6 @@ iQSM+ – Gradio Web Interface
 
 Launch:
     python app.py                   # CPU
-    python app.py --share           # public Gradio link
     python app.py --server-port 8080
 
 Docker:
@@ -178,22 +177,22 @@ _DISPLAY_VMAX =  0.2   # ppm
 
 
 def _make_slice_figure(nii_path: str, vmin: float, vmax: float):
-    """Render axial/coronal/sagittal middle slices; return PNG file paths."""
+    """Render axial/coronal/sagittal middle slices; return list of (path, caption) for Gallery."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
     vol = nib.load(nii_path).get_fdata(dtype=np.float32)
 
-    raw_slices = [
-        vol[:, :, vol.shape[2] // 2].T,
-        vol[:, vol.shape[1] // 2, :].T,
-        vol[vol.shape[0] // 2, :, :].T,
+    slices = [
+        (vol[:, :, vol.shape[2] // 2].T, "Axial"),
+        (vol[:, vol.shape[1] // 2, :].T, "Coronal"),
+        (vol[vol.shape[0] // 2, :, :].T, "Sagittal"),
     ]
 
     out_dir = tempfile.mkdtemp(prefix="iqsm_preview_")
-    paths = []
-    for i, sl in enumerate(raw_slices):
+    result = []
+    for i, (sl, caption) in enumerate(slices):
         fig, ax = plt.subplots(figsize=(4, 4), dpi=120)
         ax.imshow(sl, cmap="gray", origin="lower", aspect="equal", vmin=vmin, vmax=vmax)
         ax.axis("off")
@@ -204,9 +203,9 @@ def _make_slice_figure(nii_path: str, vmin: float, vmax: float):
         fig.savefig(path, dpi=120, bbox_inches="tight", pad_inches=0,
                     facecolor="#111827")
         plt.close(fig)
-        paths.append(path)
+        result.append((path, caption))
 
-    return paths[0], paths[1], paths[2]
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -314,12 +313,12 @@ def reconstruct(
         )
 
     try:
-        ax_img, cor_img, sag_img = _make_slice_figure(out_path, _DISPLAY_VMIN, _DISPLAY_VMAX)
+        gallery_data = _make_slice_figure(out_path, _DISPLAY_VMIN, _DISPLAY_VMAX)
     except Exception:
-        ax_img = cor_img = sag_img = None
+        gallery_data = []
 
     status = "✅ Done — download QSM file below."
-    return status, out_path, ax_img, cor_img, sag_img
+    return status, out_path, gallery_data
 
 
 # ---------------------------------------------------------------------------
@@ -542,10 +541,11 @@ def build_ui():
                 download_file = gr.File(label="QSM — susceptibility map (.nii.gz)")
 
                 gr.HTML('<p class="sec-label" style="margin-top:14px">Preview — QSM middle slices</p>')
-                with gr.Row(elem_id="preview-row"):
-                    axial_img    = gr.Image(label="Axial",    show_label=True, height=210, type="filepath")
-                    coronal_img  = gr.Image(label="Coronal",  show_label=True, height=210, type="filepath")
-                    sagittal_img = gr.Image(label="Sagittal", show_label=True, height=210, type="filepath")
+                qsm_gallery = gr.Gallery(
+                    columns=3, rows=1, height=230,
+                    object_fit="contain", show_label=False,
+                    elem_id="preview-row",
+                )
 
         # ── Footer ──────────────────────────────────────────────────────
         gr.HTML("""
@@ -570,7 +570,7 @@ def build_ui():
             outputs=[te_str, voxel_str, b0_val],
         )
 
-        _run_outputs  = [status_box, download_file, axial_img, coronal_img, sagittal_img]
+        _run_outputs  = [status_box, download_file, qsm_gallery]
         _demo_outputs = [
             phase_file, mag_file, mask_file,
             te_str, voxel_str, b0dir_str, b0_val, eroded_rad, negate_phase,
@@ -599,7 +599,6 @@ def build_ui():
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="iQSM+ Gradio server")
-    parser.add_argument("--share",       action="store_true", help="Create public Gradio link")
     parser.add_argument("--server-port", type=int, default=7860)
     parser.add_argument("--server-name", type=str, default="0.0.0.0")
     args = parser.parse_args()
@@ -608,7 +607,6 @@ if __name__ == "__main__":
     demo.launch(
         theme=_THEME,
         css=_CSS,
-        share=args.share,
         server_name=args.server_name,
         server_port=args.server_port,
         show_error=True,
