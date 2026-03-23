@@ -53,7 +53,7 @@ def _demo_not_found_html() -> str:
     s += '<p style="margin:0 0 4px">Download all four files and place them in the <code>demo/</code> folder:</p>'
     s += '<ul style="margin:0 0 10px;padding-left:18px">'
     for f in _DEMO_FILES_HF:
-        s += f'<li><a href="{_DEMO_HF_BASE}/{f}" target="_blank" style="color:#dc2626">{f}</a></li>'
+        s += f'<li><a href="{_DEMO_HF_BASE}/{f}?download=true" target="_blank" style="color:#dc2626">{f}</a></li>'
     s += '</ul>'
     s += '<p style="margin:0">Then click <strong>⬇ Load Demo Data</strong> again — no Docker restart needed.</p>'
     s += '</div>'
@@ -213,7 +213,7 @@ def _ckpt_not_found_html() -> str:
     s += '<p style="margin:0 0 4px">Download both files and place them in the <code>checkpoints/</code> folder:</p>'
     s += '<ul style="margin:0 0 10px;padding-left:18px">'
     for f in _CKPT_FILES:
-        s += f'<li><a href="{_HF_BASE}/{f}" target="_blank" style="color:#dc2626">{f}</a></li>'
+        s += f'<li><a href="{_HF_BASE}/{f}?download=true" target="_blank" style="color:#dc2626">{f}</a></li>'
     s += '</ul>'
     s += '<p style="margin:0">Then click <strong>▶ Run Reconstruction</strong> again — no Docker restart needed.</p>'
     s += '</div>'
