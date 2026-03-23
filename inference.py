@@ -20,6 +20,10 @@ from scipy.ndimage import zoom, binary_erosion
 _HERE = os.path.dirname(os.path.abspath(__file__))  # iQSM_Plus/
 _CKPT_DIR = os.path.join(_HERE, "checkpoints")
 _HF_REPO = "sunhongfu/iQSM_Plus"
+_CKPT_FILENAMES = [
+    "iQSM_plus.pth",
+    "LoTLayer_chi.pth",
+]
 
 from models.lot_unet import LoT_Unet, LoTLayer  # noqa: E402
 from models.unet import Unet  # noqa: E402
@@ -32,12 +36,12 @@ class CheckpointNotFoundError(Exception):
 _CKPT_NOT_FOUND_MSG = """\
 Model weights not downloaded yet.
 
-The app needs pre-trained model files to run. \
-Download them once by running this command in the iQSM_Plus project folder:
+Click the "⬇ Download Model Weights" button in the app to download them automatically.
+If you prefer the command line, run this in the iQSM_Plus project folder:
 
     python run.py --download-checkpoints
 
-Once the download is complete, try again — no need to restart the app.\
+Once downloaded, click Run again — no need to restart the app.\
 """
 
 

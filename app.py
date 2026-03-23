@@ -19,7 +19,7 @@ import gradio as gr
 import nibabel as nib
 import numpy as np
 
-from inference import run_iqsm_plus, CheckpointNotFoundError
+from inference import run_iqsm_plus, CheckpointNotFoundError, _CKPT_DIR, _HF_REPO, _CKPT_FILENAMES
 
 
 # ---------------------------------------------------------------------------
@@ -214,6 +214,32 @@ def _make_slice_figure(nii_path: str, vmin: float, vmax: float):
         result.append((path, caption))
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# Checkpoint download callback
+# ---------------------------------------------------------------------------
+
+def download_checkpoints(progress=gr.Progress(track_tqdm=True)):
+    import shutil
+    try:
+        from huggingface_hub import hf_hub_download
+    except ImportError:
+        return _status_html(
+            "huggingface_hub is not installed.\n"
+            "Run:  pip install huggingface_hub", ok=False)
+    os.makedirs(_CKPT_DIR, exist_ok=True)
+    total = len(_CKPT_FILENAMES)
+    for i, name in enumerate(_CKPT_FILENAMES):
+        local = os.path.join(_CKPT_DIR, name)
+        if os.path.exists(local):
+            progress((i + 1) / total, desc=f"{name} — already present, skipping.")
+            continue
+        progress(i / total, desc=f"Downloading {name} …")
+        cached = hf_hub_download(repo_id=_HF_REPO, filename=name)
+        shutil.copy(cached, local)
+        progress((i + 1) / total, desc=f"{name} — done.")
+    return _status_html("✅ Model weights downloaded. Click Run to start reconstruction.")
 
 
 # ---------------------------------------------------------------------------
@@ -593,6 +619,9 @@ def build_ui():
                     value='<p style="color:#94a3b8;font-size:0.875rem;margin:0">Results will appear here after reconstruction…</p>',
                     elem_id="status-box",
                 )
+                dl_ckpt_btn = gr.Button(
+                    "⬇  Download Model Weights", variant="secondary", size="sm",
+                )
                 download_file = gr.File(label="QSM — susceptibility map (.nii.gz)")
 
                 gr.HTML('<p class="sec-label" style="margin-top:14px">Preview — QSM middle slices</p>')
@@ -642,6 +671,11 @@ def build_ui():
                 b0_val, eroded_rad, negate_phase,
             ],
             outputs=_run_outputs,
+        )
+        dl_ckpt_btn.click(
+            fn=download_checkpoints,
+            inputs=[],
+            outputs=[status_box],
         )
         demo_btn.click(
             fn=load_demo_data,
