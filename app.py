@@ -182,6 +182,28 @@ def _status_html(msg: str, ok: bool = True) -> str:
     return f'<pre style="color:{color};font-weight:600;margin:0;white-space:pre-wrap;font-family:inherit;font-size:0.875rem">{_html.escape(msg)}</pre>'
 
 
+_HF_BASE = "https://huggingface.co/sunhongfu/iQSM_Plus/resolve/main"
+_CKPT_FILES = [
+    "iQSM_plus.pth",
+    "LoTLayer_chi.pth",
+]
+
+def _ckpt_not_found_html() -> str:
+    s = '<div style="color:#dc2626;font-size:0.875rem;line-height:1.6">'
+    s += '<p style="font-weight:700;margin:0 0 6px">⚠ Model weights not found in <code>checkpoints/</code></p>'
+    s += '<p style="margin:0 0 4px"><strong>Option A — Python (run on the host, not inside Docker):</strong></p>'
+    s += '<pre style="background:#fef2f2;padding:6px 10px;border-radius:4px;margin:0 0 10px;font-size:0.8rem">python run.py --download-checkpoints</pre>'
+    s += '<p style="margin:0 0 4px"><strong>Option B — Manual download (no Python needed):</strong></p>'
+    s += '<p style="margin:0 0 4px">Download both files and place them in the <code>checkpoints/</code> folder:</p>'
+    s += '<ul style="margin:0 0 10px;padding-left:18px">'
+    for f in _CKPT_FILES:
+        s += f'<li><a href="{_HF_BASE}/{f}" target="_blank" style="color:#dc2626">{f}</a></li>'
+    s += '</ul>'
+    s += '<p style="margin:0">Then click <strong>▶ Run Reconstruction</strong> again — no Docker restart needed.</p>'
+    s += '</div>'
+    return s
+
+
 _DISPLAY_VMIN = -0.2   # ppm
 _DISPLAY_VMAX =  0.2   # ppm
 
@@ -316,8 +338,8 @@ def reconstruct(
             output_dir=output_dir,
             progress_fn=_progress,
         )
-    except CheckpointNotFoundError as exc:
-        return _status_html(str(exc), ok=False), None, []
+    except CheckpointNotFoundError:
+        return _ckpt_not_found_html(), None, []
     except Exception:
         tb = traceback.format_exc()
         print(tb, flush=True)
