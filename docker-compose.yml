@@ -40,7 +40,6 @@ services:
     ports:
       - "7860:7860"
     volumes:
-      - ./outputs:/tmp/iqsm_outputs
       - ./demo:/iQSM_Plus/demo
       - ./checkpoints:/iQSM_Plus/checkpoints
 
