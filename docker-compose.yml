@@ -15,6 +15,7 @@
 # Start the app:
 #   docker compose build               ← first time only
 #   docker compose up                  ← web app at http://localhost:7860
+#   PORT=7861 docker compose up        ← use a different local port
 #
 # demo/ and checkpoints/ are bind-mounted — files downloaded on the host are
 # visible inside the container immediately, no restart needed.
@@ -38,7 +39,7 @@ services:
         TORCH_VARIANT: cpu
     image: iqsm-plus:latest
     ports:
-      - "7860:7860"
+      - "${PORT:-7860}:7860"
     volumes:
       - ./demo:/iQSM_Plus/demo
       - ./checkpoints:/iQSM_Plus/checkpoints
