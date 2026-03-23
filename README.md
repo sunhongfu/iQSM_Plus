@@ -4,204 +4,264 @@
 
 [MIA 2024](https://doi.org/10.1016/j.media.2024.103160) &nbsp;|&nbsp; [arXiv](https://arxiv.org/abs/2311.07823) &nbsp;|&nbsp; [HuggingFace](https://huggingface.co/sunhongfu/iQSM_Plus) &nbsp;|&nbsp; [deepMRI collection](https://github.com/sunhongfu/deepMRI)
 
-iQSM+ enables direct QSM reconstruction from raw MRI phase acquired at **arbitrary orientations**, using orientation-adaptive latent feature editing (OA-LFE) blocks that learn the encoding of acquisition orientation vectors and integrate them seamlessly into the network.
-
-> **Update (March 2025):** New user-friendly MATLAB wrappers for iQSM+/iQSM/iQFM/xQSM/xQSM+ with simpler syntax — all available in this repo.
-
-> **Windows users:** Run `iQSM_fcns/ConfigurePython.m` first and update the `pyExec` variable to your conda Python path.
+iQSM+ extends iQSM to handle **arbitrary acquisition orientations** — not just axial scans. It uses orientation-adaptive latent feature editing (OA-LFE) blocks that learn the encoding of acquisition orientation vectors and integrate them into the network. It supports single-echo and multi-echo phase inputs.
 
 ---
 
 ## Overview
 
-### Framework
+![Framework](https://github.com/sunhongfu/iQSM_Plus/blob/master/figs/fig1.png)
 
-![Whole Framework](https://github.com/sunhongfu/iQSM_Plus/blob/master/figs/fig1.png)
+*Fig. 1: Orientation-Adaptive Neural Network with OA-LFE blocks.*
 
-Fig. 1: The overall structure of the proposed Orientation-Adaptive Neural Network, incorporating OA-LFE blocks that learn orientation encoding and integrate it into latent features.
+![Results](https://github.com/sunhongfu/iQSM_Plus/blob/master/figs/fig3.png)
 
-### Representative Results
-
-![Representative Results](https://github.com/sunhongfu/iQSM_Plus/blob/master/figs/fig3.png)
-
-Fig. 2: Comparison of iQSM, iQSM-Mixed, and iQSM+ on simulated brains at different acquisition orientations and in vivo 3T scans.
+*Fig. 2: Comparison of iQSM, iQSM-Mixed, and iQSM+ at different acquisition orientations.*
 
 ---
 
-## Model Checkpoints and Demo Data
+## Which Setup Should I Use?
 
-Pre-trained model weights and demo datasets are hosted on **[Hugging Face Hub](https://huggingface.co/sunhongfu/iQSM_Plus)** (`sunhongfu/iQSM_Plus`).
+| I want to… | Best option |
+|---|---|
+| Just try it quickly, no coding | **Docker** (Option 1) |
+| Use the web app on a shared server | **Docker** or **Conda** |
+| Run from the command line / scripts | **Conda** or **pip** |
+| Call from MATLAB | **MATLAB wrapper** (requires Conda or pip) |
+| Use an NVIDIA GPU | **Docker** (GPU mode) or **Conda/pip** |
 
-**Why Hugging Face?**
-- GitHub repositories are not designed for large binary files. Hugging Face Hub provides reliable, version-controlled hosting for ML model weights and large NIfTI volumes with no file-size limits.
-- The `huggingface_hub` library handles caching automatically: files are downloaded once and stored in `~/.cache/huggingface/hub/`, so subsequent runs load from disk instantly.
+---
 
-**Auto-download behaviour:**
-- **Checkpoints** — downloaded automatically on first inference (via `run.py` or `app.py`). No manual step required.
-- **Demo data** — downloaded when you run `python run.py --download-demo` or click **⬇ Load Demo Data** in the web app.
+## Option 1 — Docker (Web App, Recommended)
 
-You can also pre-warm the cache manually:
+**Best for:** Windows, macOS (including Apple Silicon), Linux. No Python setup needed.
+
+**Requirements:** [Docker Desktop](https://docs.docker.com/get-docker/) (or Docker Engine on Linux).
+
+### Steps
 
 ```bash
-python run.py --download-demo   # fetch demo NIfTIs + params.json
-```
-
----
-
-## Requirements
-
-- Python 3.7+, PyTorch 1.8+
-- NVIDIA GPU recommended; CPU also supported
-- MATLAB R2017b+ (for MATLAB wrappers only — not needed for web app)
-- FSL (for BET brain mask extraction, optional)
-
-Tested on: Windows 11 (RTX 4090 / A4000), macOS (M1 Pro Max), CentOS 7.8 (Tesla V100).
-
----
-
-## Quick Start – No MATLAB Required (Web App)
-
-iQSM+ is available as a **browser-based web app** — no MATLAB, no command line needed. Pretrained checkpoints and demo data download automatically on first use.
-
-### Option A – Docker (recommended)
-
-```bash
-# 1. Install Docker Desktop: https://docs.docker.com/get-docker/
+# 1. Clone the repository
 git clone https://github.com/sunhongfu/iQSM_Plus.git
 cd iQSM_Plus
 
-# CPU (works on any machine including Apple Silicon)
-docker compose up
+# 2. Download model weights (run once, on the host — not inside Docker)
+python run.py --download-checkpoints
 
-# NVIDIA GPU (Linux only – needs NVIDIA Container Toolkit)
-# Edit docker-compose.yml: set TORCH_VARIANT to cu121, uncomment GPU block
-docker compose up
-
-# Open browser: http://localhost:7860
-```
-
-### Option B – Conda
-
-```bash
-git clone https://github.com/sunhongfu/iQSM_Plus.git
-cd iQSM_Plus
-conda env create -f environment.yml
-conda activate iqsm-plus
-python app.py   # opens http://localhost:7860
-```
-
-### Option C – pip
-
-```bash
-pip install torch   # see requirements.txt for platform-specific instructions
-pip install -r requirements.txt
-python app.py
-```
-
-**Web UI features:**
-- Upload phase NIfTI (`.nii` / `.nii.gz`) or DICOM
-- Echo times auto-extracted from DICOM headers
-- Optionally upload magnitude and brain mask
-- Click **⬇ Load Demo Data** to auto-fill all fields with the demo dataset
-- Click **▶ Run Reconstruction** to process
-- Download QSM result NIfTI — view in FSLeyes / ITK-SNAP / 3D Slicer
-
----
-
-## Quick Start — Command Line
-
-```bash
-# First time: download demo data and see how to run it
+# 3. (Optional) Download demo data to try the app
 python run.py --download-demo
 
-# Single-echo
-python run.py --phase ph.nii.gz --te 0.020 --mask mask.nii.gz
-
-# Multi-echo
-python run.py --phase ph.nii.gz --te 0.0032 0.0065 0.0098 --mag mag.nii.gz
-
-# Use a config file
-python run.py --config config.yaml
-
-# All options
-python run.py --help
+# 4. Start the app
+docker compose up
 ```
 
-Checkpoints are downloaded automatically on first run and cached in `~/.cache/huggingface/hub/`.
+Open **http://localhost:7860** in your browser.
+
+> The `demo/` and `checkpoints/` folders are bind-mounted into the container — files downloaded on the host are immediately visible inside Docker without a restart.
+
+### Enable NVIDIA GPU (Linux only)
+
+1. Install the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html).
+2. Edit `docker-compose.yml`: set `TORCH_VARIANT: cu121`.
+3. Uncomment the GPU block at the bottom of `docker-compose.yml`.
+4. Rebuild and start:
+
+```bash
+docker compose build
+docker compose up
+```
 
 ---
 
-## MATLAB Quick Start
+## Option 2 — Conda (Web App + CLI)
 
-### Clone and set up environment
+**Best for:** Users with Anaconda or Miniconda already installed.
+
+**Requirements:** [Anaconda](https://www.anaconda.com/download) or [Miniconda](https://docs.anaconda.com/miniconda/).
+
+### Steps
 
 ```bash
+# 1. Clone the repository
 git clone https://github.com/sunhongfu/iQSM_Plus.git
 cd iQSM_Plus
 
-conda create -n iQSM_Plus python=3.8
-conda activate iQSM_Plus
-conda install pytorch torchvision cudatoolkit=10.2 -c pytorch
-conda install scipy
+# 2. Create and activate the environment
+conda env create -f environment.yml
+conda activate iqsm-plus
+
+# 3a. Launch the web app
+python app.py
+#     → open http://localhost:7860
+
+# 3b. Or use the command line directly
+python run.py --download-demo          # download demo data
+python run.py --download-checkpoints   # download model weights
+python run.py --phase ph.nii.gz --te 0.020 --mask mask.nii.gz
 ```
 
-Checkpoints are downloaded automatically on first inference. No manual download needed.
+> **GPU note:** `environment.yml` installs `pytorch-cuda=12.1` by default. To install CPU-only, remove that line from `environment.yml` before running `conda env create`.
 
-### Run reconstruction (MATLAB)
+---
 
-```matlab
-QSM = iQSM_plus(phase, TE, 'mag', mag, 'mask', mask, 'voxel_size', [1,1,1], 'B0', 3, 'B0_dir', [0,0,1], 'eroded_rad', 3, 'output_dir', pwd);
-```
+## Option 3 — pip (Web App + CLI)
 
-For xQSM+ reconstruction:
+**Best for:** Users who prefer pip, or already have a Python environment.
 
-```matlab
-QSM = xQSM_plus(lfs, 'mask', mask, 'B0_dir', [0,0,1], 'voxel_size', [1,1,1], 'output_dir', pwd);
+**Requirements:** Python 3.10+.
+
+### Steps
+
+```bash
+# 1. Clone the repository
+git clone https://github.com/sunhongfu/iQSM_Plus.git
+cd iQSM_Plus
+
+# 2. Install PyTorch (choose one):
+pip install torch                                                        # Apple Silicon or CPU
+pip install torch --index-url https://download.pytorch.org/whl/cpu      # Linux/Windows CPU-only
+pip install torch --index-url https://download.pytorch.org/whl/cu121    # Linux/Windows NVIDIA GPU
+
+# 3. Install remaining dependencies
+pip install -r requirements.txt
+
+# 4a. Launch the web app
+python app.py
+#     → open http://localhost:7860
+
+# 4b. Or use the command line directly
+python run.py --download-demo          # download demo data
+python run.py --download-checkpoints   # download model weights
+python run.py --phase ph.nii.gz --te 0.0032 0.0065 0.0098 --mag mag.nii.gz
 ```
 
 ---
 
-## MATLAB Wrapper: iQSM_plus
+## Option 4 — MATLAB Wrapper
 
-**Compulsory inputs:**
-- `phase` — 3D (single-echo) or 4D (multi-echo) GRE phase volume
-- `TE` — echo time(s) in seconds, e.g. `20e-3` or `[4,8,12,16,20,24,28]*1e-3`
+**Best for:** Users already working in MATLAB who want to call iQSM+ directly.
 
-**Optional inputs:**
-- `mag` — magnitude volume (default: ones)
-- `mask` — brain mask (default: ones)
-- `voxel_size` — resolution in mm (default: `[1 1 1]`)
-- `B0_dir` — B0 field direction (default: `[0 0 1]` for axial)
-- `B0` — field strength in Tesla (default: `3`)
-- `eroded_rad` — brain mask erosion radius in voxels (default: `3`)
-- `output_dir` — output folder (default: current directory)
+**Requirements:** MATLAB R2017b+, and a working Python environment (Conda or pip — see Options 2/3 above).
 
-Outputs: `iQSM_plus.nii` (NIfTI) and `iQSM.mat` saved to `output_dir`.
+> **Windows users:** Run `iQSM_fcns/ConfigurePython.m` first and update the `pyExec` variable to your Python executable path.
 
----
+### Steps
 
-## How to Calculate B0_dir from DICOM
+```bash
+# 1. Clone the repository
+git clone https://github.com/sunhongfu/iQSM_Plus.git
+
+# 2. Set up Python environment (Conda or pip, see Options 2/3 above)
+#    Model weights are downloaded automatically on first inference.
+```
+
+```matlab
+% Run the demo
+demo_multi_echo
+```
+
+### Function signatures
+
+```matlab
+% iQSM+ — arbitrary orientation QSM
+QSM = iQSM_plus(phase, TE, 'mag', mag, 'mask', mask, ...
+                'voxel_size', [1,1,1], 'B0', 3, 'B0_dir', [0,0,1], ...
+                'eroded_rad', 3, 'output_dir', pwd);
+
+% xQSM+ — dipole inversion at arbitrary orientation
+QSM = xQSM_plus(lfs, 'mask', mask, 'B0_dir', [0,0,1], ...
+                'voxel_size', [1,1,1], 'output_dir', pwd);
+```
+
+### Parameters — iQSM_plus
+
+| Parameter | Required | Description |
+|---|---|---|
+| `phase` | ✓ | 3D (single-echo) or 4D (multi-echo) GRE phase volume |
+| `TE` | ✓ | Echo time(s) in seconds — e.g. `20e-3` or `[4,8,12,16,20,24,28]*1e-3` |
+| `mag` | | Magnitude volume (default: ones) |
+| `mask` | | Brain mask (default: ones) |
+| `voxel_size` | | Resolution in mm (default: `[1 1 1]`) |
+| `B0_dir` | | B0 direction unit vector (default: `[0 0 1]` for axial) |
+| `B0` | | Field strength in Tesla (default: `3`) |
+| `eroded_rad` | | Brain mask erosion radius in voxels (default: `3`) |
+| `output_dir` | | Output folder (default: current directory) |
+
+### How to derive B0_dir from DICOM
 
 ```matlab
 Xz = dicom_info.ImageOrientationPatient(3);
 Yz = dicom_info.ImageOrientationPatient(6);
 Zxyz = cross(dicom_info.ImageOrientationPatient(1:3), dicom_info.ImageOrientationPatient(4:6));
-Zz = Zxyz(3);
-B0_dir = [Xz, Yz, Zz];
+B0_dir = [Xz, Yz, Zxyz(3)];
 ```
+
+### Available MATLAB functions
+
+| Function | Description |
+|---|---|
+| `iQSM_plus` | Single-step QSM at arbitrary orientation |
+| `iQSM` | Single-step QSM (axial only) |
+| `iQFM` | Single-step tissue field mapping |
+| `xQSM_plus` | xQSM dipole inversion at arbitrary orientation |
+| `xQSM` | xQSM dipole inversion (axial only) |
 
 ---
 
-## Available Reconstruction Functions
+## Downloading Checkpoints and Demo Data
 
-| Function | Task |
-|----------|------|
-| `iQSM_plus` | Single-step QSM at arbitrary orientation |
-| `iQSM` | Single-step QSM (axial) |
-| `iQFM` | Single-step tissue field mapping |
-| `xQSM_plus` | xQSM dipole inversion at arbitrary orientation |
-| `xQSM` | xQSM dipole inversion (axial) |
-| `SQNet` | — |
+Model weights and demo data are hosted on [Hugging Face Hub](https://huggingface.co/sunhongfu/iQSM_Plus).
+
+```bash
+# Download model weights into checkpoints/
+python run.py --download-checkpoints
+
+# Download demo data into demo/ and print the run command
+python run.py --download-demo
+```
+
+> **Docker users:** Run these commands on the **host machine** before or after starting the container — not inside Docker. The folders are bind-mounted, so files appear immediately without a restart.
+
+Files are also cached in `~/.cache/huggingface/hub/` for reuse.
+
+---
+
+## Web App Features
+
+- Upload phase NIfTI (`.nii` / `.nii.gz`) or DICOM — single-echo (3D) or multi-echo (4D)
+- Echo times auto-extracted from DICOM headers
+- Optionally upload magnitude and brain mask
+- Set B0 direction for non-axial acquisitions
+- Click **⬇ Load Demo Data** to auto-fill all fields with the demo dataset
+- Click **▶ Run Reconstruction** to generate the QSM map
+- Download output NIfTI — view in [FSLeyes](https://fsl.fmrib.ox.ac.uk/fsl/fslwiki/FSLeyes), [ITK-SNAP](http://www.itksnap.org/), or [3D Slicer](https://www.slicer.org/)
+
+---
+
+## Command Line Reference
+
+```bash
+# Show all options
+python run.py --help
+
+# Download demo data (prints example run command)
+python run.py --download-demo
+
+# Single-echo reconstruction
+python run.py --phase ph.nii.gz --te 0.020 --mask mask.nii.gz
+
+# Multi-echo reconstruction
+python run.py --phase ph.nii.gz --te 0.0032 0.0065 0.0098 --mag mag.nii.gz
+
+# Non-axial acquisition (specify B0 direction)
+python run.py --phase ph.nii.gz --te 0.020 --b0-dir 0.1 0.0 0.995
+
+# Use a YAML config file
+python run.py --config config.yaml
+
+# Override output directory
+python run.py --phase ph.nii.gz --te 0.020 --output ./my_output/
+```
 
 ---
 

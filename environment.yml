@@ -19,5 +19,5 @@ dependencies:
   - pip
   - pip:
       - nibabel>=5.0
-      - gradio>=4.0
+      - gradio>=6.0
       - pydicom>=2.3

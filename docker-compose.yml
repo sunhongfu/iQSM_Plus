@@ -9,19 +9,15 @@
 #
 # First-time setup (run once on the host — NOT inside the container):
 #
-#   mkdir -p demo checkpoints          ← IMPORTANT: do this before docker compose up
-#   python run.py --download-demo      ← downloads demo NIfTIs into demo/
 #   python run.py --download-checkpoints  ← downloads model weights into checkpoints/
-#
-# If you skip mkdir first, Docker will create demo/ and checkpoints/ as root-owned
-# directories and downloads will fail with a permission error.
+#   python run.py --download-demo         ← (optional) downloads demo NIfTIs into demo/
 #
 # Start the app:
 #   docker compose build               ← first time only
 #   docker compose up                  ← web app at http://localhost:7860
 #
-# demo/ and checkpoints/ are bind-mounted — the web app sees files immediately
-# after downloading on the host, no container restart needed.
+# demo/ and checkpoints/ are bind-mounted — files downloaded on the host are
+# visible inside the container immediately, no restart needed.
 #
 # NVIDIA GPU (Linux only):
 #   1. Install NVIDIA Container Toolkit
