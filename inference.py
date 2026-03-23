@@ -25,18 +25,24 @@ from models.lot_unet import LoT_Unet, LoTLayer  # noqa: E402
 from models.unet import Unet  # noqa: E402
 
 
+_CKPT_NOT_FOUND_MSG = """\
+Model checkpoints not found in checkpoints/.
+
+Download them on the host before (or after) starting Docker:
+
+    python run.py --download-checkpoints
+
+The checkpoints/ folder is bind-mounted into the container — no restart needed.
+Just click Run Reconstruction again after downloading.\
+"""
+
+
 def _ckpt(filename: str) -> str:
-    """Return local path to a checkpoint, downloading from HF Hub if not present."""
+    """Return local path to a checkpoint, raising a clear error if not present."""
     local = os.path.join(_CKPT_DIR, filename)
     if os.path.exists(local):
         return local
-    print(f"  Downloading checkpoint {filename} …", flush=True)
-    from huggingface_hub import hf_hub_download
-    import shutil
-    cached = hf_hub_download(repo_id=_HF_REPO, filename=filename)
-    os.makedirs(_CKPT_DIR, exist_ok=True)
-    shutil.copy(cached, local)
-    return local
+    raise RuntimeError(_CKPT_NOT_FOUND_MSG)
 
 
 # ---------------------------------------------------------------------------

@@ -7,23 +7,21 @@
 #   - Windows (Docker Desktop with WSL2)
 #   - Linux (AMD64 or ARM64)
 #
-# Usage:
-#   docker compose build              ← first time only
-#   docker compose up                 ← start web app at http://localhost:7860
+# First-time setup (run once on the host — NOT inside the container):
 #
-# Demo data and checkpoints are NOT bundled in the image.
-# Download them into the local folders before or after starting:
+#   mkdir -p demo checkpoints          ← IMPORTANT: do this before docker compose up
+#   python run.py --download-demo      ← downloads demo NIfTIs into demo/
+#   python run.py --download-checkpoints  ← downloads model weights into checkpoints/
 #
-#   # On the host (if Python env is available):
-#   python run.py --download-demo
-#   python run.py --download-checkpoints
+# If you skip mkdir first, Docker will create demo/ and checkpoints/ as root-owned
+# directories and downloads will fail with a permission error.
 #
-#   # Or while the container is running (no restart needed):
-#   docker compose exec iqsm-plus python run.py --download-demo
-#   docker compose exec iqsm-plus python run.py --download-checkpoints
+# Start the app:
+#   docker compose build               ← first time only
+#   docker compose up                  ← web app at http://localhost:7860
 #
-# demo/ and checkpoints/ are bind-mounted so the container and host
-# always share the same files. Downloads are visible immediately.
+# demo/ and checkpoints/ are bind-mounted — the web app sees files immediately
+# after downloading on the host, no container restart needed.
 #
 # NVIDIA GPU (Linux only):
 #   1. Install NVIDIA Container Toolkit
