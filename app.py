@@ -472,17 +472,25 @@ _CSS = """
 /* ── Hide Gradio share button ─────────────────────────────────── */
 .share-button { display: none !important; }
 
-/* ── Gallery lightbox: hide close (X) button while in browser fullscreen ──
-   Clicking X while the browser is in fullscreen leaves the page stuck in
-   fullscreen mode. Users must press Escape or click exit-fullscreen instead. */
-:fullscreen button[aria-label="Close"],
-:fullscreen button[aria-label="close"],
-:fullscreen .close-btn,
-:fullscreen .close-button,
-:-webkit-full-screen button[aria-label="Close"],
-:-webkit-full-screen button[aria-label="close"],
-:-webkit-full-screen .close-btn,
-:-webkit-full-screen .close-button { display: none !important; }
+/* ── Gallery: click-to-fullscreen, no overlay buttons ───────────
+   Images go directly to browser fullscreen on click; click again
+   to exit. All gallery hover/overlay action buttons are hidden. */
+.gallery img { cursor: zoom-in !important; }
+img:fullscreen, img:-webkit-full-screen {
+    object-fit: contain !important;
+    background: #000 !important;
+    cursor: zoom-out !important;
+    width: 100vw !important;
+    height: 100vh !important;
+}
+.gallery .icon-buttons,
+.gallery .icon-button,
+.gallery .download,
+.gallery .share,
+[data-testid="gallery"] .icon-buttons,
+[data-testid="gallery"] .icon-button,
+[data-testid="gallery"] .download,
+[data-testid="gallery"] .share { display: none !important; }
 """
 
 _THEME = gr.themes.Default(
@@ -494,6 +502,7 @@ _THEME = gr.themes.Default(
 
 _HEAD = """<script>
 (function() {
+    // ── Theme toggle ─────────────────────────────────────────────
     var key = 'iqsm-theme';
     var saved = localStorage.getItem(key) || 'light';
     document.documentElement.classList.toggle('dark', saved === 'dark');
@@ -506,6 +515,24 @@ _HEAD = """<script>
             t.textContent = next === 'dark' ? '\u2600 Light mode' : '\u263d Dark mode';
         }
     });
+
+    // ── Gallery: click image → browser fullscreen; click again → exit ──
+    // Capture phase runs before Gradio's bubble-phase lightbox handler,
+    // so stopImmediatePropagation() prevents the lightbox from opening.
+    document.addEventListener('click', function(e) {
+        if (document.fullscreenElement) {
+            document.exitFullscreen();
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            return;
+        }
+        var img = e.target.closest('img');
+        if (img && img.closest('.gallery, [data-testid="gallery"]')) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            img.requestFullscreen().catch(console.error);
+        }
+    }, true);
 })();
 </script>"""
 
@@ -628,6 +655,8 @@ def build_ui():
                 qsm_gallery = gr.Gallery(
                     columns=3, rows=1, height=230,
                     object_fit="contain", show_label=False,
+                    show_download_button=False, show_share_button=False,
+                    allow_preview=False,
                     elem_id="preview-row",
                 )
 
