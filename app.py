@@ -172,6 +172,14 @@ def _parse_floats(text: str, name: str, n: int | None = None) -> list[float]:
     return vals
 
 
+def _status_html(msg: str, ok: bool = True) -> str:
+    import html as _html
+    color = "#16a34a" if ok else "#dc2626"
+    if ok:
+        return f'<p style="color:{color};font-weight:600;margin:0">{_html.escape(msg)}</p>'
+    return f'<pre style="color:{color};font-weight:600;margin:0;white-space:pre-wrap;font-family:inherit;font-size:0.875rem">{_html.escape(msg)}</pre>'
+
+
 _DISPLAY_VMIN = -0.2   # ppm
 _DISPLAY_VMAX =  0.2   # ppm
 
@@ -307,19 +315,18 @@ def reconstruct(
             progress_fn=_progress,
         )
     except CheckpointNotFoundError as exc:
-        return str(exc), None, []
+        return _status_html(str(exc), ok=False), None, []
     except Exception:
         tb = traceback.format_exc()
         print(tb, flush=True)
-        return "Reconstruction failed — check the terminal / Docker log for the full error.", None, []
+        return _status_html("Reconstruction failed — check the terminal / Docker log for the full error.", ok=False), None, []
 
     try:
         gallery_data = _make_slice_figure(out_path, _DISPLAY_VMIN, _DISPLAY_VMAX)
     except Exception:
         gallery_data = []
 
-    status = "✅ Done — download QSM file below."
-    return status, out_path, gallery_data
+    return _status_html("✅ Done — download QSM file below."), out_path, gallery_data
 
 
 # ---------------------------------------------------------------------------
@@ -396,9 +403,10 @@ _CSS = """
 }
 
 /* ── Status box ──────────────────────────────────────────────── */
-#status-box textarea {
+#status-box {
     font-size: 0.875rem !important;
-    color: #1e293b !important;
+    min-height: 60px !important;
+    padding: 4px 0 !important;
 }
 
 /* ── Preview images ──────────────────────────────────────────── */
@@ -458,36 +466,28 @@ _THEME = gr.themes.Default(
     neutral_hue=gr.themes.colors.slate,
 )
 
-_JS = """
-function() {
-    const key = 'iqsm-theme';
-    const saved = localStorage.getItem(key) || 'light';
-    if (saved === 'dark') {
-        document.documentElement.classList.add('dark');
-    } else {
-        document.documentElement.classList.remove('dark');
-    }
-    function updateBtn(theme) {
-        const btn = document.getElementById('theme-toggle');
-        if (btn) btn.textContent = theme === 'dark' ? '\u2600 Light mode' : '\u263d Dark mode';
-    }
-    updateBtn(saved);
+_HEAD = """<script>
+(function() {
+    var key = 'iqsm-theme';
+    var saved = localStorage.getItem(key) || 'light';
+    document.documentElement.classList.toggle('dark', saved === 'dark');
     document.addEventListener('click', function(e) {
-        if (e.target && e.target.id === 'theme-toggle') {
-            const next = document.documentElement.classList.contains('dark') ? 'light' : 'dark';
+        var t = e.target;
+        if (t && t.id === 'theme-toggle') {
+            var next = document.documentElement.classList.contains('dark') ? 'light' : 'dark';
             document.documentElement.classList.toggle('dark', next === 'dark');
             localStorage.setItem(key, next);
-            updateBtn(next);
+            t.textContent = next === 'dark' ? '\u2600 Light mode' : '\u263d Dark mode';
         }
     });
-}
-"""
+})();
+</script>"""
 
 TITLE = "iQSM+ — Quantitative Susceptibility Mapping"
 
 
 def build_ui():
-    with gr.Blocks(title=TITLE) as demo:
+    with gr.Blocks(title=TITLE, head=_HEAD) as demo:
 
         # ── Header ──────────────────────────────────────────────────────
         gr.HTML("""
@@ -589,10 +589,8 @@ def build_ui():
 
                 gr.HTML('<p class="sec-label">Results</p>')
 
-                status_box = gr.Textbox(
-                    label="Status",
-                    lines=4, interactive=False,
-                    placeholder="Results will appear here after reconstruction …",
+                status_box = gr.HTML(
+                    value='<p style="color:#94a3b8;font-size:0.875rem;margin:0">Results will appear here after reconstruction…</p>',
                     elem_id="status-box",
                 )
                 download_file = gr.File(label="QSM — susceptibility map (.nii.gz)")
@@ -664,7 +662,6 @@ if __name__ == "__main__":
     demo.launch(
         theme=_THEME,
         css=_CSS,
-        js=_JS,
         server_name=args.server_name,
         server_port=args.server_port,
         show_error=True,
