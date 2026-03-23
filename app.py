@@ -558,7 +558,7 @@ TITLE = "iQSM+ — Quantitative Susceptibility Mapping"
 
 
 def build_ui():
-    with gr.Blocks(title=TITLE, js=_JS) as demo:
+    with gr.Blocks(title=TITLE) as demo:
 
         # ── Header ──────────────────────────────────────────────────────
         gr.HTML("""
@@ -668,7 +668,7 @@ def build_ui():
 
                 gr.HTML('<p class="sec-label" style="margin-top:14px">Preview — QSM middle slices &nbsp;<span style="font-weight:400;font-size:0.78rem;color:#94a3b8">click to fullscreen</span></p>')
                 qsm_preview = gr.Image(
-                    show_label=False, interactive=False,
+                    show_label=False, interactive=False, type="numpy",
                     elem_id="qsm-preview", height=230,
                 )
 
@@ -732,6 +732,7 @@ if __name__ == "__main__":
     demo.launch(
         theme=_THEME,
         css=_CSS,
+        js=_JS,
         server_name=args.server_name,
         server_port=args.server_port,
         show_error=True,
