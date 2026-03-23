@@ -36,12 +36,28 @@ _DEMO_FILES = [
     "params.json",
 ]
 
-_DEMO_NOT_FOUND_MSG = (
-    "Demo data not found in demo/.\n\n"
-    "Run this on the host machine (outside Docker):\n\n"
-    "    python run.py --download-demo\n\n"
-    "Then click Load Demo Data again — no restart needed."
-)
+_DEMO_FILES_HF = [
+    "ph_multi_echo.nii.gz",
+    "mag_multi_echo.nii.gz",
+    "mask_multi_echo.nii.gz",
+    "params.json",
+]
+_DEMO_HF_BASE = "https://huggingface.co/sunhongfu/iQSM_Plus/resolve/main/demo"
+
+def _demo_not_found_html() -> str:
+    s = '<div style="color:#dc2626;font-size:0.875rem;line-height:1.6">'
+    s += '<p style="font-weight:700;margin:0 0 6px">⚠ Demo data not found in <code>demo/</code></p>'
+    s += '<p style="margin:0 0 4px"><strong>Option A — Python (run on the host, not inside Docker):</strong></p>'
+    s += '<pre style="background:#fef2f2;padding:6px 10px;border-radius:4px;margin:0 0 10px;font-size:0.8rem">python run.py --download-demo</pre>'
+    s += '<p style="margin:0 0 4px"><strong>Option B — Manual download (no Python needed):</strong></p>'
+    s += '<p style="margin:0 0 4px">Download all four files and place them in the <code>demo/</code> folder:</p>'
+    s += '<ul style="margin:0 0 10px;padding-left:18px">'
+    for f in _DEMO_FILES_HF:
+        s += f'<li><a href="{_DEMO_HF_BASE}/{f}" target="_blank" style="color:#dc2626">{f}</a></li>'
+    s += '</ul>'
+    s += '<p style="margin:0">Then click <strong>⬇ Load Demo Data</strong> again — no Docker restart needed.</p>'
+    s += '</div>'
+    return s
 
 
 def _load_demo_files() -> tuple[str, str, str, dict]:
@@ -50,7 +66,7 @@ def _load_demo_files() -> tuple[str, str, str, dict]:
     missing = [f for f in _DEMO_FILES
                if not os.path.exists(os.path.join(_DEMO_DIR, f))]
     if missing:
-        raise FileNotFoundError(_DEMO_NOT_FOUND_MSG)
+        raise FileNotFoundError()
     phase_path = os.path.join(_DEMO_DIR, "ph_multi_echo.nii.gz")
     mag_path   = os.path.join(_DEMO_DIR, "mag_multi_echo.nii.gz")
     mask_path  = os.path.join(_DEMO_DIR, "mask_multi_echo.nii.gz")
@@ -64,8 +80,8 @@ def load_demo_data(progress=gr.Progress(track_tqdm=True)):
     _no_change = (gr.update(),) * 10  # phase, mag, mask, te, vox, b0dir, b0, eroded, negate, demo_info
     try:
         phase_path, mag_path, mask_path, params = _load_demo_files()
-    except Exception as exc:
-        return (*_no_change, _status_html(str(exc), ok=False))
+    except FileNotFoundError:
+        return (*_no_change, _demo_not_found_html())
 
     te      = params["TE_seconds"]
     te_str  = str(te) if isinstance(te, (int, float)) else ", ".join(f"{v:.4g}" for v in te)
