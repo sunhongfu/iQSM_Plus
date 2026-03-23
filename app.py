@@ -235,9 +235,8 @@ _DISPLAY_VMIN = -0.2   # ppm
 _DISPLAY_VMAX =  0.2   # ppm
 
 
-def _make_slice_figure(nii_path: str, vmin: float, vmax: float) -> np.ndarray:
-    """Render axial/coronal/sagittal middle slices as one combined figure; return numpy array."""
-    import io
+def _make_slice_figure(nii_path: str, vmin: float, vmax: float):
+    """Render axial/coronal/sagittal middle slices; return matplotlib Figure."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -258,12 +257,7 @@ def _make_slice_figure(nii_path: str, vmin: float, vmax: float) -> np.ndarray:
         ax.axis("off")
         ax.set_facecolor(bg)
     plt.subplots_adjust(left=0.01, right=0.99, top=0.92, bottom=0.01, wspace=0.04)
-    buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=110, bbox_inches="tight", pad_inches=0.1, facecolor=bg)
-    plt.close(fig)
-    buf.seek(0)
-    arr = plt.imread(buf)          # float32 RGBA 0-1
-    return (arr[:, :, :3] * 255).astype(np.uint8)
+    return fig
 
 
 # ---------------------------------------------------------------------------
@@ -498,18 +492,7 @@ _CSS = """
 /* ── Hide Gradio share button ─────────────────────────────────── */
 .share-button { display: none !important; }
 
-/* ── Preview image: click-to-fullscreen, no buttons ─────────────
-   Click the image to enter browser fullscreen; click again to exit. */
-#qsm-preview img { cursor: zoom-in !important; }
-img:fullscreen, img:-webkit-full-screen {
-    object-fit: contain !important;
-    background: #000 !important;
-    cursor: zoom-out !important;
-    width: 100vw !important;
-    height: 100vh !important;
-}
-#qsm-preview button,
-#qsm-preview .icon-buttons { display: none !important; }
+/* ── Preview plots ────────────────────────────────────────────── */
 """
 
 _THEME = gr.themes.Default(
@@ -521,36 +504,19 @@ _THEME = gr.themes.Default(
 
 _JS = """
 () => {
-    // ── Theme toggle ─────────────────────────────────────────────
-    var key = 'iqsm-theme';
-    var saved = localStorage.getItem(key) || 'light';
-    document.documentElement.classList.toggle('dark', saved === 'dark');
+    // ── Theme toggle (uses Gradio 6 URL parameter) ──────────────
     document.addEventListener('click', function(e) {
         var t = (e.composedPath && e.composedPath()[0]) || e.target;
         if (t && t.id === 'theme-toggle') {
-            var next = document.documentElement.classList.contains('dark') ? 'light' : 'dark';
-            document.documentElement.classList.toggle('dark', next === 'dark');
-            localStorage.setItem(key, next);
-            t.textContent = next === 'dark' ? '\u2600 Light mode' : '\u263d Dark mode';
+            var url = new URL(window.location);
+            var current = url.searchParams.get('__theme');
+            if (!current) {
+                current = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+            }
+            url.searchParams.set('__theme', current === 'dark' ? 'light' : 'dark');
+            window.location.href = url.href;
         }
     });
-
-    // ── Preview image: click → browser fullscreen; click again → exit ──
-    document.addEventListener('click', function(e) {
-        if (document.fullscreenElement) {
-            document.exitFullscreen();
-            e.preventDefault();
-            e.stopImmediatePropagation();
-            return;
-        }
-        var img = ((e.composedPath && e.composedPath()[0]) || e.target).closest('img');
-        if (!img) return;
-        if (img.closest('#qsm-preview')) {
-            e.preventDefault();
-            e.stopImmediatePropagation();
-            img.requestFullscreen().catch(console.error);
-        }
-    }, true);
 }
 """
 
@@ -667,9 +633,9 @@ def build_ui():
                 download_file = gr.File(label="QSM — susceptibility map (.nii.gz)")
 
                 gr.HTML('<p class="sec-label" style="margin-top:14px">Preview — QSM middle slices &nbsp;<span style="font-weight:400;font-size:0.78rem;color:#94a3b8">click to fullscreen</span></p>')
-                qsm_preview = gr.Image(
-                    show_label=False, interactive=False, type="numpy",
-                    elem_id="qsm-preview", height=230,
+                qsm_preview = gr.Plot(
+                    show_label=False,
+                    elem_id="qsm-preview",
                 )
 
         # ── Footer ──────────────────────────────────────────────────────
