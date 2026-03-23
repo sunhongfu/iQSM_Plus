@@ -61,15 +61,16 @@ def _demo_not_found_html() -> str:
 
 
 def _load_demo_files() -> tuple[str, str, str, dict]:
-    """Load demo NIfTIs + params.json from local demo/ folder."""
-    import json
+    """Load demo NIfTIs + params.json; copy NIfTIs to tempdir so Gradio can serve them."""
+    import json, shutil
     missing = [f for f in _DEMO_FILES
                if not os.path.exists(os.path.join(_DEMO_DIR, f))]
     if missing:
         raise FileNotFoundError()
-    phase_path = os.path.join(_DEMO_DIR, "ph_multi_echo.nii.gz")
-    mag_path   = os.path.join(_DEMO_DIR, "mag_multi_echo.nii.gz")
-    mask_path  = os.path.join(_DEMO_DIR, "mask_multi_echo.nii.gz")
+    tmp = tempfile.mkdtemp(prefix="iqsm_demo_")
+    phase_path = shutil.copy(os.path.join(_DEMO_DIR, "ph_multi_echo.nii.gz"), tmp)
+    mag_path   = shutil.copy(os.path.join(_DEMO_DIR, "mag_multi_echo.nii.gz"), tmp)
+    mask_path  = shutil.copy(os.path.join(_DEMO_DIR, "mask_multi_echo.nii.gz"), tmp)
     with open(os.path.join(_DEMO_DIR, "params.json")) as f:
         params = json.load(f)
     return phase_path, mag_path, mask_path, params
