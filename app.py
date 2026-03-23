@@ -418,6 +418,18 @@ _CSS = """
 
 /* ── Hide Gradio share button ─────────────────────────────────── */
 .share-button { display: none !important; }
+
+/* ── Gallery lightbox: hide close (X) button while in browser fullscreen ──
+   Clicking X while the browser is in fullscreen leaves the page stuck in
+   fullscreen mode. Users must press Escape or click exit-fullscreen instead. */
+:fullscreen button[aria-label="Close"],
+:fullscreen button[aria-label="close"],
+:fullscreen .close-btn,
+:fullscreen .close-button,
+:-webkit-full-screen button[aria-label="Close"],
+:-webkit-full-screen button[aria-label="close"],
+:-webkit-full-screen .close-btn,
+:-webkit-full-screen .close-button { display: none !important; }
 """
 
 _THEME = gr.themes.Default(
