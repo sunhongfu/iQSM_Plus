@@ -417,6 +417,24 @@ _CSS = """
 .app-footer a { color: #64748b !important; text-decoration: none; }
 .app-footer a:hover { text-decoration: underline !important; }
 
+/* ── Theme toggle button ─────────────────────────────────────── */
+.app-header { position: relative !important; }
+#theme-toggle {
+    position: absolute !important;
+    top: 16px !important;
+    right: 16px !important;
+    background: rgba(255,255,255,0.15) !important;
+    color: #ffffff !important;
+    border: 1px solid rgba(255,255,255,0.35) !important;
+    border-radius: 6px !important;
+    padding: 6px 14px !important;
+    font-size: 0.8rem !important;
+    font-weight: 500 !important;
+    cursor: pointer !important;
+    transition: background 0.2s !important;
+}
+#theme-toggle:hover { background: rgba(255,255,255,0.28) !important; }
+
 /* ── Hide Gradio share button ─────────────────────────────────── */
 .share-button { display: none !important; }
 
@@ -440,15 +458,41 @@ _THEME = gr.themes.Default(
     neutral_hue=gr.themes.colors.slate,
 )
 
+_JS = """
+function() {
+    const key = 'iqsm-theme';
+    const saved = localStorage.getItem(key) || 'light';
+    if (saved === 'dark') {
+        document.documentElement.classList.add('dark');
+    } else {
+        document.documentElement.classList.remove('dark');
+    }
+    function updateBtn(theme) {
+        const btn = document.getElementById('theme-toggle');
+        if (btn) btn.textContent = theme === 'dark' ? '\u2600\ufe0f Light mode' : '\ud83c\udf19 Dark mode';
+    }
+    updateBtn(saved);
+    document.addEventListener('click', function(e) {
+        if (e.target && e.target.id === 'theme-toggle') {
+            const next = document.documentElement.classList.contains('dark') ? 'light' : 'dark';
+            document.documentElement.classList.toggle('dark', next === 'dark');
+            localStorage.setItem(key, next);
+            updateBtn(next);
+        }
+    });
+}
+"""
+
 TITLE = "iQSM+ — Quantitative Susceptibility Mapping"
 
 
 def build_ui():
-    with gr.Blocks(title=TITLE) as demo:
+    with gr.Blocks(title=TITLE, js=_JS) as demo:
 
         # ── Header ──────────────────────────────────────────────────────
         gr.HTML("""
         <div class="app-header">
+          <button id="theme-toggle">🌙 Dark mode</button>
           <h1>iQSM+ &mdash; Quantitative Susceptibility Mapping</h1>
           <p>
             Deep learning QSM reconstruction from single- or multi-echo MRI phase
