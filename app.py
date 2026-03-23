@@ -67,20 +67,13 @@ def _find_demo_nii(name: str) -> str:
 
 
 def _load_demo_files() -> tuple[str, str, str, dict]:
-    """Load demo NIfTIs + params.json; copy NIfTIs to tempdir so Gradio can serve them."""
-    import json, shutil
+    """Load demo NIfTIs + params.json from local demo/ folder."""
+    import json
     if not os.path.exists(os.path.join(_DEMO_DIR, "params.json")):
         raise FileNotFoundError()
-    try:
-        phase_src = _find_demo_nii("ph_multi_echo.nii.gz")
-        mag_src   = _find_demo_nii("mag_multi_echo.nii.gz")
-        mask_src  = _find_demo_nii("mask_multi_echo.nii.gz")
-    except FileNotFoundError:
-        raise FileNotFoundError()
-    tmp = tempfile.mkdtemp(prefix="iqsm_demo_")
-    phase_path = shutil.copy(phase_src, tmp)
-    mag_path   = shutil.copy(mag_src, tmp)
-    mask_path  = shutil.copy(mask_src, tmp)
+    phase_path = _find_demo_nii("ph_multi_echo.nii.gz")
+    mag_path   = _find_demo_nii("mag_multi_echo.nii.gz")
+    mask_path  = _find_demo_nii("mask_multi_echo.nii.gz")
     with open(os.path.join(_DEMO_DIR, "params.json")) as f:
         params = json.load(f)
     return phase_path, mag_path, mask_path, params
