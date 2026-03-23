@@ -34,14 +34,14 @@ class CheckpointNotFoundError(Exception):
 
 
 _CKPT_NOT_FOUND_MSG = """\
-Model weights not downloaded yet.
+Model weights not found in checkpoints/.
 
-Click the "⬇ Download Model Weights" button in the app to download them automatically.
-If you prefer the command line, run this in the iQSM_Plus project folder:
+Run this command on the host machine (outside Docker) before starting the app:
 
     python run.py --download-checkpoints
 
-Once downloaded, click Run again — no need to restart the app.\
+This downloads the weights into the checkpoints/ folder that Docker mounts.
+Once done, click Run again — no restart needed.\
 """
 
 
