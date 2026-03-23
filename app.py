@@ -50,7 +50,7 @@ def _load_demo_files() -> tuple[str, str, str, dict]:
     missing = [f for f in _DEMO_FILES
                if not os.path.exists(os.path.join(_DEMO_DIR, f))]
     if missing:
-        raise gr.Error(_DEMO_NOT_FOUND_MSG)
+        raise FileNotFoundError(_DEMO_NOT_FOUND_MSG)
     phase_path = os.path.join(_DEMO_DIR, "ph_multi_echo.nii.gz")
     mag_path   = os.path.join(_DEMO_DIR, "mag_multi_echo.nii.gz")
     mask_path  = os.path.join(_DEMO_DIR, "mask_multi_echo.nii.gz")

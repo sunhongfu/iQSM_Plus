@@ -55,6 +55,7 @@ def _download_to(filename: str, hf_path: str, local_dir: str) -> str:
 def cmd_download_demo():
     import json
     print(f"Fetching demo data from huggingface.co/{_HF_REPO} → {_DEMO_DIR}/")
+    os.makedirs(_DEMO_DIR, exist_ok=True)
     for name in _DEMO_FILENAMES:
         local = os.path.join(_DEMO_DIR, name)
         if os.path.exists(local):
@@ -102,6 +103,7 @@ Or copy config.yaml, fill in the paths above, and run:
 
 def cmd_download_checkpoints():
     print(f"Fetching model checkpoints from huggingface.co/{_HF_REPO} → {_CKPT_DIR}/")
+    os.makedirs(_CKPT_DIR, exist_ok=True)
     for name in _CKPT_FILENAMES:
         local = os.path.join(_CKPT_DIR, name)
         if os.path.exists(local):
