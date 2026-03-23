@@ -75,24 +75,31 @@ def _load_demo_files() -> tuple[str, str, str, dict]:
     return phase_path, mag_path, mask_path, params
 
 
-def load_demo_data(progress=gr.Progress(track_tqdm=True)):
+def load_demo_data():
     """Load demo files and populate all input fields. Does not run reconstruction."""
     _no_change = (gr.update(),) * 10  # phase, mag, mask, te, vox, b0dir, b0, eroded, negate, demo_info
     try:
         phase_path, mag_path, mask_path, params = _load_demo_files()
     except FileNotFoundError:
         return (*_no_change, _demo_not_found_html())
+    except Exception as exc:
+        err = f'<p style="color:#dc2626;font-size:0.875rem">⚠ Error loading demo: {exc}</p>'
+        return (*_no_change, err)
 
-    te      = params["TE_seconds"]
-    te_str  = str(te) if isinstance(te, (int, float)) else ", ".join(f"{v:.4g}" for v in te)
-    vox     = params["voxel_size_mm"]
-    vox_str = " ".join(f"{v:.4g}" for v in vox)
-    b0      = params["B0_Tesla"]
-    eroded  = params.get("eroded_rad", 3)
-    negate  = params["phase_sign_convention"] == 1
-    mat     = params.get("matrix_size", "")
-    mat_str = "×".join(str(x) for x in mat) if mat else ""
-    n_echo  = params.get("num_echoes", "")
+    try:
+        te      = params["TE_seconds"]
+        te_str  = str(te) if isinstance(te, (int, float)) else ", ".join(f"{v:.4g}" for v in te)
+        vox     = params["voxel_size_mm"]
+        vox_str = " ".join(f"{v:.4g}" for v in vox)
+        b0      = params["B0_Tesla"]
+        eroded  = params.get("eroded_rad", 3)
+        negate  = params["phase_sign_convention"] == 1
+        mat     = params.get("matrix_size", "")
+        mat_str = "×".join(str(x) for x in mat) if mat else ""
+        n_echo  = params.get("num_echoes", "")
+    except Exception as exc:
+        err = f'<p style="color:#dc2626;font-size:0.875rem">⚠ Error reading demo params: {exc}</p>'
+        return (*_no_change, err)
 
     demo_info = (
         f"demo/ph_multi_echo.nii.gz    (phase, 4D)\n"
