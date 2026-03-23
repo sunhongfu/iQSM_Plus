@@ -19,7 +19,7 @@ import gradio as gr
 import nibabel as nib
 import numpy as np
 
-from inference import run_iqsm_plus
+from inference import run_iqsm_plus, CheckpointNotFoundError
 
 
 # ---------------------------------------------------------------------------
@@ -306,6 +306,8 @@ def reconstruct(
             output_dir=output_dir,
             progress_fn=_progress,
         )
+    except CheckpointNotFoundError as exc:
+        raise gr.Error(str(exc))
     except Exception:
         raise gr.Error(
             "Reconstruction failed — check the log for details.\n\n"

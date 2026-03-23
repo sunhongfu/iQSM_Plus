@@ -25,24 +25,31 @@ from models.lot_unet import LoT_Unet, LoTLayer  # noqa: E402
 from models.unet import Unet  # noqa: E402
 
 
-_CKPT_NOT_FOUND_MSG = """\
-Model checkpoints not found in checkpoints/.
+class CheckpointNotFoundError(Exception):
+    """Raised when model checkpoint files have not been downloaded yet."""
 
-Download them on the host before (or after) starting Docker:
+
+_CKPT_NOT_FOUND_MSG = """\
+Model weights not downloaded yet.
+
+The app needs pre-trained model files to run. Download them once by running \
+this command on your computer (in the iQSM_Plus folder, not inside Docker):
 
     python run.py --download-checkpoints
 
-The checkpoints/ folder is bind-mounted into the container — no restart needed.
-Just click Run Reconstruction again after downloading.\
+This saves the files into the checkpoints/ folder. \
+Because that folder is shared with the running app, \
+you do not need to restart Docker — just click Run Reconstruction again \
+once the download finishes.\
 """
 
 
 def _ckpt(filename: str) -> str:
-    """Return local path to a checkpoint, raising a clear error if not present."""
+    """Return local path to a checkpoint, raising CheckpointNotFoundError if absent."""
     local = os.path.join(_CKPT_DIR, filename)
     if os.path.exists(local):
         return local
-    raise RuntimeError(_CKPT_NOT_FOUND_MSG)
+    raise CheckpointNotFoundError(_CKPT_NOT_FOUND_MSG)
 
 
 # ---------------------------------------------------------------------------
