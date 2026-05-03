@@ -1,0 +1,9 @@
+# iQSM+ – web app dependencies (includes all base requirements)
+#
+#   pip install -r requirements-webapp.txt
+#
+# Pin Gradio 5.x — Gradio 6 has breaking API changes.
+
+-r requirements.txt
+gradio>=5.0,<6
+matplotlib>=3.7
