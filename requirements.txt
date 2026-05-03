@@ -1,16 +1,17 @@
 # iQSM+ – core Python dependencies (CLI inference, no web stack)
-# The Dockerfile installs PyTorch separately with the right wheel for each platform.
 #
-# For a manual install (outside Docker):
-#   Apple Silicon / any CPU:    pip install torch
-#   Linux AMD64 CPU-only:       pip install torch --index-url https://download.pytorch.org/whl/cpu
-#   Linux AMD64 NVIDIA GPU:     pip install torch --index-url https://download.pytorch.org/whl/cu121
+# Manual install:
+#   Apple Silicon / CPU:  pip install torch
+#   Linux AMD64 CPU:      pip install torch --index-url https://download.pytorch.org/whl/cpu
+#   Linux AMD64 GPU:      pip install torch --index-url https://download.pytorch.org/whl/cu121
 # Then:
-#   pip install -r requirements.txt            # CLI only (no Gradio)
-#   pip install -r requirements-webapp.txt     # add web app (Gradio 5.x + Matplotlib)
+#   pip install -r requirements.txt            # CLI only
+#   pip install -r requirements-webapp.txt     # add web app (Gradio + Matplotlib)
 
 numpy>=1.23
 scipy>=1.10
 nibabel>=5.0
-pydicom>=2.3
+h5py>=3.8
+pydicom>=2.4
 huggingface_hub>=0.20
+pyyaml>=6.0
