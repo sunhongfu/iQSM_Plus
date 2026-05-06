@@ -9,6 +9,10 @@ demo/*.nii.gz
 outputs/
 *.nii
 *.nii.gz
+iqsm_plus_output/
+
+# Local dicom_to_nifti.py conversion outputs
+dicom_converted*/
 
 # Python
 __pycache__/

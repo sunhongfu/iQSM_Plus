@@ -166,46 +166,104 @@ def shape_summary(paths):
 # DICOM loader for QSM input (phase + optional magnitude)
 # ---------------------------------------------------------------------------
 
-def _is_phase_dicom(ds):
-    """True if the DICOM image is a phase image (vs magnitude/real/imag).
+# GE Medical Systems private tag, named in the dictionary
+# "Image Type (real, imaginary, phase, magnitude)". Predates DICOM's
+# standard ComplexImageComponent and GE often uses it instead of marking
+# ImageType. Enumeration: 0=magnitude, 1=phase, 2=real, 3=imaginary.
+_GE_IMAGE_TYPE_TAG = (0x0043, 0x102F)
+_GE_IMAGE_TYPE_MAP = {0: "M", 1: "P", 2: "R", 3: "I"}
 
-    Convention: ImageType has 'P' or 'PHASE' for phase. We default to **not
-    phase** when ImageType is missing — for QSM the user must provide phase
-    explicitly, so an unmarked file is treated as magnitude (safer).
-    """
-    image_type = list(getattr(ds, "ImageType", []))
-    markers = {str(t).upper() for t in image_type}
+
+def _image_type_markers(ds):
+    """Collect modality markers from every channel a vendor might use:
+    ImageType, ComplexImageComponent (DICOM standard), and the GE private tag."""
+    markers = {str(t).upper() for t in list(getattr(ds, "ImageType", []))}
+
+    # DICOM standard, Enhanced MR: 'MAGNITUDE' / 'PHASE' / 'REAL' / 'IMAGINARY' / 'MIXED'
+    cic = getattr(ds, "ComplexImageComponent", None)
+    if cic:
+        s = str(cic).upper()
+        if s.startswith("MAG"):
+            markers.add("M")
+        elif s.startswith("PH"):
+            markers.add("P")
+        elif s.startswith("REAL"):
+            markers.add("R")
+        elif s.startswith("IMAG"):
+            markers.add("I")
+
+    # GE private tag (often the only reliable source on GE scanners).
+    try:
+        elem = ds.get(_GE_IMAGE_TYPE_TAG)
+        if elem is not None:
+            v = elem.value
+            if isinstance(v, (list, tuple)):
+                v = v[0] if v else None
+            if v is not None:
+                ge_marker = _GE_IMAGE_TYPE_MAP.get(int(v))
+                if ge_marker:
+                    markers.add(ge_marker)
+    except Exception:
+        pass
+
+    return markers
+
+
+def _is_phase_dicom(ds):
+    """True if the DICOM is a phase image (excludes magnitude/real/imaginary)."""
+    markers = _image_type_markers(ds)
     if "P" in markers or "PHASE" in markers:
         return True
     if {"M", "MAGNITUDE", "I", "IMAGINARY", "R", "REAL"} & markers:
         return False
-    # Vendor-specific suffixes
     for m in markers:
         if m.startswith("P_") or m.endswith("_P"):
             return True
-        if m.startswith("M_") or m.endswith("_M"):
+        if m.startswith(("M_", "R_", "I_")) or m.endswith(("_M", "_R", "_I")):
             return False
-    # No marker — uncertain; treat as not-phase by default
     return False
 
 
 def _is_magnitude_dicom(ds):
-    """True if the DICOM image is a magnitude image."""
-    image_type = list(getattr(ds, "ImageType", []))
-    markers = {str(t).upper() for t in image_type}
+    """True if the DICOM is a magnitude image (excludes phase/real/imaginary)."""
+    markers = _image_type_markers(ds)
     if "M" in markers or "MAGNITUDE" in markers:
         return True
-    if "P" in markers or "PHASE" in markers:
-        return False
-    if {"I", "IMAGINARY", "R", "REAL"} & markers:
+    if {"P", "PHASE", "I", "IMAGINARY", "R", "REAL"} & markers:
         return False
     for m in markers:
         if m.startswith("M_") or m.endswith("_M"):
             return True
-        if m.startswith("P_") or m.endswith("_P"):
+        if m.startswith(("P_", "R_", "I_")) or m.endswith(("_P", "_R", "_I")):
             return False
-    # Default (no marker) — treat as magnitude
+    # No marker — historical default: treat as magnitude.
     return True
+
+
+def _is_real_dicom(ds):
+    """True if the DICOM is the real part of a complex acquisition."""
+    markers = _image_type_markers(ds)
+    if "R" in markers or "REAL" in markers:
+        return True
+    if {"M", "MAGNITUDE", "P", "PHASE", "I", "IMAGINARY"} & markers:
+        return False
+    for m in markers:
+        if m.startswith("R_") or m.endswith("_R"):
+            return True
+    return False
+
+
+def _is_imag_dicom(ds):
+    """True if the DICOM is the imaginary part of a complex acquisition."""
+    markers = _image_type_markers(ds)
+    if "I" in markers or "IMAGINARY" in markers:
+        return True
+    if {"M", "MAGNITUDE", "P", "PHASE", "R", "REAL"} & markers:
+        return False
+    for m in markers:
+        if m.startswith("I_") or m.endswith("_I"):
+            return True
+    return False
 
 
 def _slice_position(ds):
@@ -304,14 +362,35 @@ def _normalise_phase_to_radians(vol):
     return (vol - pmin) / rng * (2 * pi) - pi
 
 
-def load_dicom_qsm_folder(file_paths, output_dir):
-    """Parse DICOMs, separating phase and magnitude, group by EchoTime, and
-    save NIfTI files in `output_dir`.
+def load_dicom_qsm_folder(file_paths, output_dir, chopper="auto"):
+    """Parse GRE DICOMs into phase + magnitude NIfTI volumes.
+
+    Recognises four ImageType buckets — phase (P/PHASE), magnitude
+    (M/MAGNITUDE), real (R/REAL), and imaginary (I/IMAGINARY). Decision rule:
+
+      • If real **and** imaginary DICOMs are both present and cover the same
+        echo set, derive phase = ``angle(R + 1j·I)`` and magnitude =
+        ``|R + 1j·I|``. This branch is preferred even when explicit P/M
+        DICOMs are also present in the same folder.
+      • Otherwise, use the explicit phase DICOMs (and magnitude DICOMs, if
+        any) directly.
+
+    Each modality is grouped by ``EchoTime`` and slices sorted by
+    ``ImagePositionPatient`` before stacking.
+
+    The ``chopper`` parameter controls the GE slice-direction sign-flip
+    correction (a missing fftshift in GE's 3D recon — applies only when
+    forming the complex signal from real + imaginary):
+
+      • ``"auto"`` (default) — apply when ``Manufacturer`` looks like GE.
+      • ``"on"``  — always apply, regardless of manufacturer.
+      • ``"off"`` — never apply.
 
     Returns a dict:
         {
-            "phase_path"  : Path | None  – 3D (single-echo) or 4D NIfTI of phase
-            "mag_path"    : Path | None  – 3D / 4D NIfTI of magnitude (if found)
+            "phase_path"  : Path         – 3D (single-echo) or 4D NIfTI of phase
+            "mag_path"    : Path | None  – 3D / 4D NIfTI of magnitude (if found
+                                            or derived from real/imag)
             "te_values_s" : list[float]  – echo times in **seconds**, sorted
             "voxel_size"  : list[float]  – [x, y, z] in mm
             "b0"          : float | None – field strength in Tesla
@@ -319,8 +398,8 @@ def load_dicom_qsm_folder(file_paths, output_dir):
             "phase_shape" : tuple        – shape of the saved phase NIfTI
         }
 
-    Raises ValueError on missing phase, mixed studies, mismatched echo
-    slice counts, or empty input.
+    Raises ``ValueError`` on missing phase / real-imag pair, mixed studies,
+    mismatched echo slice counts, or empty input.
     """
     try:
         import pydicom
@@ -364,15 +443,12 @@ def load_dicom_qsm_folder(file_paths, output_dir):
             "Please provide DICOMs from a single GRE acquisition only."
         )
 
+    # Sort each candidate into one of four ImageType buckets. Use a strict
+    # priority order so each DICOM ends up in at most one bucket.
     phase_files = [(f, ds) for f, ds in candidates if _is_phase_dicom(ds)]
-    mag_files = [(f, ds) for f, ds in candidates if _is_magnitude_dicom(ds)]
-
-    if not phase_files:
-        raise ValueError(
-            "No phase DICOMs detected (need ImageType containing 'P' / 'PHASE'). "
-            "iQSM requires wrapped phase as input. If your scanner doesn't tag "
-            "phase images explicitly, export only the phase series and try again."
-        )
+    real_files  = [(f, ds) for f, ds in candidates if _is_real_dicom(ds)]
+    imag_files  = [(f, ds) for f, ds in candidates if _is_imag_dicom(ds)]
+    mag_files   = [(f, ds) for f, ds in candidates if _is_magnitude_dicom(ds)]
 
     # Group by EchoTime
     def _group_by_te(items):
@@ -386,47 +462,133 @@ def load_dicom_qsm_folder(file_paths, output_dir):
         return groups
 
     phase_groups = _group_by_te(phase_files)
-    mag_groups = _group_by_te(mag_files) if mag_files else {}
+    real_groups  = _group_by_te(real_files)  if real_files  else {}
+    imag_groups  = _group_by_te(imag_files)  if imag_files  else {}
+    mag_groups   = _group_by_te(mag_files)   if mag_files   else {}
 
-    if not phase_groups:
-        raise ValueError(
-            "No EchoTime tag found in phase DICOMs — cannot determine echoes."
-        )
+    # Pick a source for phase + magnitude.
+    # If real+imag form a complete pair (same TE set, both populated),
+    # prefer them and *derive* phase + magnitude — even when explicit
+    # P/M DICOMs are also present (the user explicitly asked for this).
+    use_complex = (
+        bool(real_groups) and bool(imag_groups)
+        and set(real_groups) == set(imag_groups)
+    )
 
-    # Validate slice counts within phase
-    counts = {te: len(items) for te, items in phase_groups.items()}
-    if len(set(counts.values())) > 1:
-        details = "\n".join(f"    TE = {te:g} ms : {n} slices"
-                            for te, n in sorted(counts.items()))
-        raise ValueError(
-            "Phase echo groups have mismatched slice counts — likely DICOMs from "
-            "multiple scans are mixed. Detected:\n" + details
-        )
+    if use_complex:
+        te_keys_ms = sorted(real_groups.keys())
+        if not te_keys_ms:
+            raise ValueError(
+                "Real/imaginary DICOMs detected but they have no EchoTime tag — "
+                "cannot determine echoes."
+            )
+        # Validate slice counts (per-echo, real vs imag must match)
+        for te in te_keys_ms:
+            n_r = len(real_groups[te])
+            n_i = len(imag_groups[te])
+            if n_r != n_i:
+                raise ValueError(
+                    f"Real/imag echo TE = {te:g} ms has mismatched slice counts "
+                    f"({n_r} real vs {n_i} imag) — likely DICOMs from different "
+                    "series are mixed."
+                )
+        counts = {te: len(real_groups[te]) for te in te_keys_ms}
+        if len(set(counts.values())) > 1:
+            details = "\n".join(f"    TE = {te:g} ms : {n} slices"
+                                for te, n in sorted(counts.items()))
+            raise ValueError(
+                "Real/imag echo groups have mismatched slice counts:\n" + details
+            )
 
-    te_keys_ms = sorted(phase_groups.keys())
+        # GE's reconstruction inserts an alternating ±1 along the slice
+        # direction in image space (FFT centering quirk). Without correction,
+        # real/imag look fine in magnitude but phase has π flips on every
+        # other slice, looking like massive wrapping. Multiply each z-slice
+        # by (-1)^z before forming the complex signal — equivalent to the
+        # ``chopper`` array used in many GE-DICOM MATLAB pipelines.
+        sample_ds = real_groups[te_keys_ms[0]][0][1]
+        manufacturer = str(getattr(sample_ds, "Manufacturer", "")).upper()
+        is_ge = "GE MEDICAL" in manufacturer or manufacturer == "GE"
+        mode = (chopper or "auto").lower()
+        if mode not in ("auto", "on", "off"):
+            raise ValueError(f"chopper must be 'auto', 'on', or 'off' (got {chopper!r}).")
+        apply_chopper = (mode == "on") or (mode == "auto" and is_ge)
+
+        # _stack_echo already sorts each list by IPP, so paired real/imag
+        # slices end up at matching positions inside each 3D volume.
+        phase_vols, mag_vols = [], []
+        affine = None
+        for te in te_keys_ms:
+            real_vol, aff = _stack_echo([ds for _, ds in real_groups[te]])
+            imag_vol, _   = _stack_echo([ds for _, ds in imag_groups[te]])
+            if affine is None:
+                affine = aff
+            if apply_chopper:
+                # chopper shape (1, 1, Z) so it broadcasts over the volume
+                z = real_vol.shape[2]
+                chopper_vec = ((-1.0) ** np.arange(z, dtype=np.float32))[None, None, :]
+                real_vol = real_vol * chopper_vec
+                imag_vol = imag_vol * chopper_vec
+            cplx = real_vol.astype(np.float32) + 1j * imag_vol.astype(np.float32)
+            phase_vols.append(np.angle(cplx).astype(np.float32))
+            mag_vols.append(np.abs(cplx).astype(np.float32))
+        if apply_chopper:
+            why = ("manufacturer is GE" if is_ge and mode == "auto"
+                   else "user requested --chopper on")
+            print(f"  Applied slice-direction chopper ((-1)^z) to real + imag "
+                  f"before forming complex signal ({why}).")
+        elif mode == "off" and is_ge:
+            print("  ⚠️  GE scanner detected but --chopper off was requested — "
+                  "phase may show alternating π flips along the slice direction.")
+        # Use the real series as the canonical metadata source.
+        meta_groups = real_groups
+    else:
+        if not phase_files:
+            raise ValueError(
+                "No phase DICOMs detected (need ImageType containing 'P' / 'PHASE', "
+                "or both 'R' / 'REAL' and 'I' / 'IMAGINARY' so phase can be derived). "
+                "If your scanner doesn't tag the modality explicitly, export only the "
+                "needed series and try again."
+            )
+        if not phase_groups:
+            raise ValueError(
+                "No EchoTime tag found in phase DICOMs — cannot determine echoes."
+            )
+
+        counts = {te: len(items) for te, items in phase_groups.items()}
+        if len(set(counts.values())) > 1:
+            details = "\n".join(f"    TE = {te:g} ms : {n} slices"
+                                for te, n in sorted(counts.items()))
+            raise ValueError(
+                "Phase echo groups have mismatched slice counts — likely DICOMs from "
+                "multiple scans are mixed. Detected:\n" + details
+            )
+
+        te_keys_ms = sorted(phase_groups.keys())
+
+        phase_vols = []
+        affine = None
+        for te in te_keys_ms:
+            slices = [ds for _, ds in phase_groups[te]]
+            vol, aff = _stack_echo(slices)
+            vol = _normalise_phase_to_radians(vol)
+            phase_vols.append(vol)
+            if affine is None:
+                affine = aff
+
+        mag_vols = []
+        if mag_groups:
+            common = [te for te in te_keys_ms if te in mag_groups]
+            if common == te_keys_ms:
+                for te in te_keys_ms:
+                    slices = [ds for _, ds in mag_groups[te]]
+                    vol, _ = _stack_echo(slices)
+                    mag_vols.append(vol)
+            # If mag echoes don't match phase echoes, drop magnitude rather than
+            # risk silently misaligning.
+        meta_groups = phase_groups
+
     te_values_s = [te / 1000.0 for te in te_keys_ms]
-
-    # Build per-echo phase volumes
-    phase_vols = []
-    affine = None
-    for te in te_keys_ms:
-        slices = [ds for _, ds in phase_groups[te]]
-        vol, aff = _stack_echo(slices)
-        vol = _normalise_phase_to_radians(vol)
-        phase_vols.append(vol)
-        if affine is None:
-            affine = aff
-
-    # Build per-echo magnitude volumes (if present and matching TEs)
-    mag_vols = []
-    if mag_groups:
-        common = [te for te in te_keys_ms if te in mag_groups]
-        if common == te_keys_ms:
-            for te in te_keys_ms:
-                slices = [ds for _, ds in mag_groups[te]]
-                vol, _ = _stack_echo(slices)
-                mag_vols.append(vol)
-        # If mag echoes don't perfectly match, drop magnitude rather than risk misalignment
 
     # Stack into 4D if multi-echo
     if len(phase_vols) == 1:
@@ -459,10 +621,11 @@ def load_dicom_qsm_folder(file_paths, output_dir):
         nib.save(nib.Nifti1Image(mag_array, affine), str(mag_path))
 
     # Metadata: voxel size from PixelSpacing + slice spacing
-    ds0 = phase_groups[te_keys_ms[0]][0][1]
+    # (taken from the modality whose DICOMs we actually used)
+    ds0 = meta_groups[te_keys_ms[0]][0][1]
     ps = list(getattr(ds0, "PixelSpacing", [1.0, 1.0]))
     # Slice spacing from two consecutive slices, or SliceThickness
-    sorted_slices0 = sorted([ds for _, ds in phase_groups[te_keys_ms[0]]],
+    sorted_slices0 = sorted([ds for _, ds in meta_groups[te_keys_ms[0]]],
                             key=_slice_position)
     if len(sorted_slices0) > 1:
         ipp0 = np.array([float(v) for v in sorted_slices0[0].ImagePositionPatient])

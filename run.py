@@ -5,23 +5,28 @@ First-time setup (download checkpoints + demo data):
     python run.py --download-checkpoints
     python run.py --download-demo
 
-Run from raw DICOMs (recommended — phase + magnitude auto-separated, TEs and
-B0 direction read from headers):
-    python run.py --dicom_dir /path/to/dicoms
+Have raw DICOMs? Convert them once with the standalone helper, then point
+this script at the converted folder:
+    python dicom_to_nifti.py --dicom_dir /path/to/dicoms --output ./converted
+    python run.py --from_converted ./converted --mask BET_mask.nii
 
-Run from pre-converted NIfTI / MAT files:
-    python run.py --echo_files ph1.nii ph2.nii ph3.nii --te_ms 4 8 12
+The `--from_converted` flag auto-loads phase / magnitude / TEs / voxel size /
+B0 / B0 direction from the folder's `params.json`.
+
+Run from explicit NIfTI / MAT files:
+    python run.py --echo_files ph1.nii ph2.nii ph3.nii --te_ms 4 8 12 --mag mag.nii.gz
     python run.py --echo_4d phase_4d.nii.gz --te_ms 4 8 12 --mag mag_4d.nii.gz
-    python run.py --phase ph.nii.gz --te 0.020 --mask mask.nii.gz
+    python run.py --phase ph.nii.gz --te 0.020 --mag mag.nii.gz --mask mask.nii.gz
 
 Non-axial acquisition — provide B0 direction in image coordinates:
-    python run.py --echo_4d ph.nii.gz --te_ms 4 8 12 --b0-dir 0.1 0.0 0.995
+    python run.py --echo_4d ph.nii.gz --te_ms 4 8 12 --mag mag.nii.gz --b0-dir 0.1 0.0 0.995
 
 YAML config (any CLI arg can be set instead in the config):
     python run.py --config config.yaml
 """
 
 import argparse
+import json
 import shutil
 import sys
 import tempfile
@@ -32,10 +37,7 @@ import numpy as np
 import yaml
 from huggingface_hub import hf_hub_download
 
-from data_utils import (
-    load_array_with_affine,
-    load_dicom_qsm_folder,
-)
+from data_utils import load_array_with_affine
 
 REPO_ROOT = Path(__file__).resolve().parent
 
@@ -121,12 +123,11 @@ def _build_parser():
                              "Defaults to the current working directory.")
 
     parser.add_argument(
-        "--dicom_dir", metavar="DIR",
-        help="Folder of multi-echo GRE phase (and, optionally, magnitude) DICOMs. "
-             "Files are walked recursively, split into phase vs. magnitude via "
-             "ImageType, grouped by EchoTime, sorted by ImagePositionPatient, "
-             "and saved as one NIfTI per modality in <output>/dicom_converted_nii/. "
-             "TE values, voxel size, B0 strength **and B0 direction** are auto-detected.",
+        "--from_converted", metavar="DIR",
+        help="Folder produced by `dicom_to_nifti.py` (contains phase.nii.gz / "
+             "magnitude.nii.gz and a params.json). TE values, voxel size, B0 "
+             "and B0 direction are read from params.json automatically; --mag "
+             "is auto-filled too.",
     )
     parser.add_argument("--echo_files", nargs="+", metavar="FILE",
                         help="Multiple 3D phase NIfTI / MAT files (one per echo). "
@@ -142,8 +143,10 @@ def _build_parser():
                         help="Echo time(s) in **milliseconds**, e.g. --te_ms 4 8 12.")
 
     parser.add_argument("--mag", metavar="FILE",
-                        help="Magnitude NIfTI / MAT (3D or 4D). Used internally by "
-                             "iQSM+ for magnitude × TE² weighted multi-echo fitting.")
+                        help="Optional magnitude NIfTI / MAT (3D or 4D). "
+                             "Used internally by iQSM+ for magnitude × TE² weighted "
+                             "multi-echo fitting; if omitted, iQSM+ falls back to "
+                             "uniform magnitude (TE²-only weighting).")
     parser.add_argument("--mask", metavar="FILE",
                         help="Brain mask NIfTI / MAT (optional; ones if omitted).")
     parser.add_argument("--bet_mask", metavar="FILE",
@@ -155,8 +158,9 @@ def _build_parser():
                         help="B0 field strength in Tesla (default: 3.0).")
     parser.add_argument("--b0-dir", nargs=3, type=float, metavar=("X", "Y", "Z"),
                         default=None, dest="b0_dir",
-                        help="B0 direction unit vector. Default: read from DICOM "
-                             "headers (when --dicom_dir is used) or [0, 0, 1] (axial).")
+                        help="B0 direction unit vector. Default: read from "
+                             "params.json (when --from_converted is used) or "
+                             "[0, 0, 1] (axial).")
     parser.add_argument("--voxel-size", nargs=3, type=float, metavar=("X", "Y", "Z"),
                         default=None,
                         help="Voxel size in mm. Reads from NIfTI header if omitted.")
@@ -219,16 +223,17 @@ def main():
     else:
         data_dir = Path.cwd()
 
-    given = sum(x is not None for x in [args.dicom_dir, args.echo_files,
+    given = sum(x is not None for x in [args.from_converted, args.echo_files,
                                         args.echo_4d, args.phase])
     if given == 0:
         parser.error(
-            "No phase input. Use one of: --dicom_dir, --echo_files, --echo_4d, --phase "
-            "(or set 'phase' / 'echoes' / 'echo_4d' / 'dicom_dir' in --config)."
+            "No phase input. Use one of: --from_converted, --echo_files, --echo_4d, --phase "
+            "(or set 'phase' / 'echoes' / 'echo_4d' / 'from_converted' in --config). "
+            "For raw DICOMs, run `python dicom_to_nifti.py` first."
         )
     if given > 1:
         parser.error(
-            "Provide exactly one of: --dicom_dir, --echo_files, --echo_4d, --phase."
+            "Provide exactly one of: --from_converted, --echo_files, --echo_4d, --phase."
         )
 
     if config_dir is not None and not Path(args.output).is_absolute():
@@ -242,45 +247,54 @@ def main():
     # ── Resolve phase input ─────────────────────────────────────────────
     phase_input_path = None      # path passed to run_iqsm_plus (3D or 4D)
     te_values_s = None
-    mag_path_resolved = None     # may be set by DICOM parsing
+    mag_path_resolved = None
     b0_dir_value = list(args.b0_dir) if args.b0_dir is not None else None
 
-    if args.dicom_dir:
-        dicom_path = _resolve_path(data_dir, args.dicom_dir)
-        if not dicom_path.is_dir():
-            parser.error(f"--dicom_dir is not a directory: {dicom_path}")
-        file_list = [str(p) for p in dicom_path.rglob("*") if p.is_file()]
-        if not file_list:
-            parser.error(f"--dicom_dir contains no files: {dicom_path}")
-        nii_out = output_dir / "dicom_converted_nii"
-        print(f"Parsing DICOMs from {dicom_path}")
-        print(f"Writing converted NIfTI files to {nii_out}")
-        result = load_dicom_qsm_folder(file_list, nii_out)
-        phase_input_path = str(result["phase_path"])
-        mag_path_resolved = str(result["mag_path"]) if result["mag_path"] else None
-        te_values_s = list(result["te_values_s"])
-        if args.voxel_size is None and result["voxel_size"]:
-            args.voxel_size = result["voxel_size"]
-            print(f"Voxel size from DICOM: {args.voxel_size}")
-        if args.b0 == 3.0 and result["b0"] is not None:
-            args.b0 = float(result["b0"])
-            print(f"B0 from DICOM: {args.b0} T")
-        if b0_dir_value is None and result["b0_dir"] is not None:
-            b0_dir_value = list(result["b0_dir"])
-            print(f"B0 direction from DICOM: {b0_dir_value}")
+    if args.from_converted:
+        cdir = _resolve_path(data_dir, args.from_converted)
+        if not cdir.is_dir():
+            parser.error(f"--from_converted is not a directory: {cdir}")
+        params_path = cdir / "params.json"
+        if not params_path.exists():
+            parser.error(
+                f"params.json not found in {cdir}. Did you produce this folder with "
+                "`dicom_to_nifti.py`?"
+            )
+        with open(params_path) as f:
+            params = json.load(f)
+        phase_nii = params.get("phase_nifti")
+        mag_nii   = params.get("magnitude_nifti")
+        if not phase_nii:
+            parser.error(f"params.json in {cdir} has no `phase_nifti` field.")
+        phase_path = cdir / phase_nii
+        if not phase_path.exists():
+            parser.error(f"Phase file missing: {phase_path}")
+        phase_input_path = str(phase_path)
+        if mag_nii and (cdir / mag_nii).exists():
+            mag_path_resolved = str(cdir / mag_nii)
+        te_values_s = [float(t) / 1000.0 for t in params.get("te_ms", [])]
+        if args.voxel_size is None and params.get("voxel_size_mm"):
+            args.voxel_size = params["voxel_size_mm"]
+            print(f"Voxel size from params.json: {args.voxel_size}")
+        if args.b0 == 3.0 and params.get("b0_T") is not None:
+            args.b0 = float(params["b0_T"])
+            print(f"B0 from params.json: {args.b0} T")
+        if b0_dir_value is None and params.get("b0_dir"):
+            b0_dir_value = list(params["b0_dir"])
+            print(f"B0 direction from params.json: {b0_dir_value}")
         if args.te_ms is not None:
             if len(args.te_ms) != len(te_values_s):
                 parser.error(
-                    f"--te_ms count ({len(args.te_ms)}) doesn't match parsed echoes "
-                    f"({len(te_values_s)})."
+                    f"--te_ms count ({len(args.te_ms)}) doesn't match number of "
+                    f"echoes in params.json ({len(te_values_s)})."
                 )
             te_values_s = [t / 1000.0 for t in args.te_ms]
             print(f"Using user-supplied TEs (ms): {args.te_ms}")
         elif args.te is not None:
             if len(args.te) != len(te_values_s):
                 parser.error(
-                    f"--te count ({len(args.te)}) doesn't match parsed echoes "
-                    f"({len(te_values_s)})."
+                    f"--te count ({len(args.te)}) doesn't match number of "
+                    f"echoes in params.json ({len(te_values_s)})."
                 )
             te_values_s = list(args.te)
             print(f"Using user-supplied TEs (s): {args.te}")
@@ -320,7 +334,9 @@ def main():
         te_values_s = ([t / 1000.0 for t in args.te_ms] if args.te_ms
                        else list(args.te))
 
-    # ── Stage magnitude / mask ──────────────────────────────────────────
+    # ── Stage magnitude (optional) / mask ──────────────────────────────
+    # Magnitude is unused for single-echo and iQSM+ falls back to mag = 1
+    # internally for multi-echo when not supplied (TE²-only weighting).
     mag_arg = args.mag or mag_path_resolved
     if mag_arg:
         mag_src = _resolve_path(data_dir, mag_arg)
