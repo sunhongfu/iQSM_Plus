@@ -8,15 +8,21 @@ generic output bundle (phase + magnitude NIfTIs + a `params.json`) that any
 of the three pipelines — or any other QSM / R2* tool — can consume.
 
 Works for both single-echo and multi-echo gradient-echo acquisitions, and for
-any of the modality combinations a scanner may export:
+whatever subset of the four modalities a scanner exports:
 
-  • phase (P/PHASE) + magnitude (M/MAGNITUDE), or
-  • real (R/REAL) + imaginary (I/IMAGINARY)
-    → phase and magnitude are derived from the complex signal:
-        phase     = angle(R + 1j·I)
-        magnitude = |R + 1j·I|
-  • any combination of the four in a single folder
-    → real + imaginary is preferred when both are present.
+  • phase only          → phase NIfTI written (fine for iQSM / iQSM+; the
+                           multi-echo combiner falls back to TE²-only
+                           weighting when no magnitude is available).
+  • magnitude only      → magnitude NIfTI written (fine for DeepRelaxo).
+  • phase + magnitude   → both written.
+  • real + imaginary    → phase and magnitude derived from the complex
+                           signal:  phase = angle(R + 1j·I),
+                                    magnitude = |R + 1j·I|.
+  • any mixture in one folder
+                        → modalities are auto-split by ImageType /
+                           ComplexImageComponent / GE private tag.
+                           Real + imaginary, when complete, is preferred
+                           over explicit phase / magnitude DICOMs.
 
 DICOMs are walked recursively from one or more folders, split by modality
 (via DICOM `ImageType`, `ComplexImageComponent`, and the GE private tag
@@ -43,9 +49,11 @@ import numpy as np
 
 _EXAMPLES = """\
 examples:
-  # A single folder of DICOMs (auto-split by ImageType). The folder may
-  # contain phase + magnitude, or real + imaginary, or all four mixed
-  # together. When both pairs are present, real + imaginary is preferred:
+  # A single folder of DICOMs (auto-split by ImageType). Any subset of the
+  # four modalities is accepted — phase only, magnitude only, phase +
+  # magnitude, real + imaginary, all four mixed, etc. When real + imaginary
+  # form a complete pair, they're preferred over explicit phase / magnitude
+  # DICOMs (phase = angle(R+jI), magnitude = |R+jI|):
   python dicom_to_nifti.py --dicom_dir /path/to/dicoms
 
   # Phase and magnitude exported as two separate folders:
@@ -565,9 +573,13 @@ def main():
 
     parser.add_argument(
         "--dicom_dir", metavar="DIR",
-        help="A single folder of mixed DICOMs (any combination of phase, "
-             "magnitude, real, imaginary). Modalities are auto-split by "
-             "ImageType / ComplexImageComponent / GE private tag.",
+        help="A single folder of DICOMs. Any subset of the four modalities "
+             "is accepted — phase only (iQSM / iQSM+ without magnitude), "
+             "magnitude only (DeepRelaxo), phase + magnitude, real + "
+             "imaginary, all four mixed, etc. Modalities are auto-split by "
+             "ImageType / ComplexImageComponent / GE private tag. When "
+             "real + imaginary form a complete pair, they're preferred "
+             "over explicit phase / magnitude DICOMs.",
     )
     parser.add_argument(
         "--phase_dir", metavar="DIR",
