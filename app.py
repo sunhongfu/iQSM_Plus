@@ -1093,9 +1093,8 @@ with gr.Blocks(title="iQSM+", analytics_enabled=False) as app:
         with gr.Accordion("Files Processing", open=False,
                           elem_classes=["dr-section", "dr-accordion"]) as order_group:
             gr.Markdown(
-                "Set the echo order when uploaded multiple 3D files (one per echo) "
-                "for a multi-echo dataset. Files are sorted naturally by filename "
-                "(`mag1`, `mag2`, …, `mag10`); rename them if the auto-sort gets it "
+                "If per-echo files are selected, echo order is sorted naturally below by "
+                "filename (`mag1`, `mag2`, …, `mag10`); rename them if the auto-sort gets it "
                 "wrong. When both modalities are supplied as 3D-per-echo files, the "
                 "two columns must have matching echo counts."
             )
@@ -1167,6 +1166,7 @@ with gr.Blocks(title="iQSM+", analytics_enabled=False) as app:
                 file_count="single",
                 file_types=[".nii", ".nii.gz", ".gz", ".mat"],
                 variant="primary",
+                elem_classes="dr-upload-btn",
             )
             mask_file = gr.File(
                 file_count="single",
