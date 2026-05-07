@@ -52,6 +52,13 @@ examples:
   python dicom_to_nifti.py --phase_dir /path/to/phase \\
                            --mag_dir   /path/to/magnitude
 
+  # Phase only (fine for iQSM / iQSM+ when magnitude isn't available —
+  # multi-echo combination falls back to TE²-only weighting):
+  python dicom_to_nifti.py --phase_dir /path/to/phase
+
+  # Magnitude only (fine for DeepRelaxo, which uses magnitude only):
+  python dicom_to_nifti.py --mag_dir /path/to/magnitude
+
   # Real and imaginary exported as two separate folders:
   python dicom_to_nifti.py --real_dir /path/to/real \\
                            --imag_dir /path/to/imaginary
@@ -564,13 +571,16 @@ def main():
     )
     parser.add_argument(
         "--phase_dir", metavar="DIR",
-        help="Folder containing only phase DICOMs "
-             "(must be supplied together with --mag_dir).",
+        help="Folder containing only phase DICOMs. Can be used alone "
+             "(phase-only output, fine for iQSM / iQSM+ when magnitude "
+             "isn't available — multi-echo combination then falls back to "
+             "TE²-only weighting) or paired with --mag_dir.",
     )
     parser.add_argument(
         "--mag_dir", metavar="DIR",
-        help="Folder containing only magnitude DICOMs "
-             "(must be supplied together with --phase_dir).",
+        help="Folder containing only magnitude DICOMs. Can be used alone "
+             "(magnitude-only output, fine for DeepRelaxo) or paired with "
+             "--phase_dir.",
     )
     parser.add_argument(
         "--real_dir", metavar="DIR",
@@ -606,16 +616,18 @@ def main():
     if modes_used == 0:
         parser.error(
             "No input folder. Provide --dicom_dir, "
-            "or --phase_dir + --mag_dir, or --real_dir + --imag_dir."
+            "or --phase_dir and/or --mag_dir, or --real_dir + --imag_dir."
         )
     if modes_used > 1:
         parser.error(
             "Pick one input mode only: --dicom_dir (single combined folder) "
-            "OR --phase_dir + --mag_dir OR --real_dir + --imag_dir. "
-            "Don't combine modes."
+            "OR --phase_dir / --mag_dir (either or both) OR --real_dir + "
+            "--imag_dir. Don't combine modes."
         )
-    if has_pm and (args.phase_dir is None or args.mag_dir is None):
-        parser.error("--phase_dir and --mag_dir must be supplied together.")
+    # phase / magnitude are independently usable — only one of the two is
+    # strictly required (phase-only is fine for iQSM / iQSM+; magnitude-only
+    # is fine for DeepRelaxo). Real + imaginary, in contrast, must always be
+    # paired since the complex signal can't be formed from one alone.
     if has_ri and (args.real_dir is None or args.imag_dir is None):
         parser.error("--real_dir and --imag_dir must be supplied together.")
 
@@ -623,8 +635,10 @@ def main():
     if has_combined:
         file_paths.extend(_walk_files(args.dicom_dir, parser))
     elif has_pm:
-        file_paths.extend(_walk_files(args.phase_dir, parser))
-        file_paths.extend(_walk_files(args.mag_dir,   parser))
+        if args.phase_dir is not None:
+            file_paths.extend(_walk_files(args.phase_dir, parser))
+        if args.mag_dir is not None:
+            file_paths.extend(_walk_files(args.mag_dir, parser))
     elif has_ri:
         file_paths.extend(_walk_files(args.real_dir, parser))
         file_paths.extend(_walk_files(args.imag_dir, parser))
