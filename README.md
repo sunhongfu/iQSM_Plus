@@ -6,6 +6,8 @@
 
 iQSM+ extends iQSM to handle **arbitrary acquisition orientations** — not just axial scans. It uses orientation-adaptive latent feature editing (OA-LFE) blocks that learn the encoding of acquisition-orientation vectors and integrate them into the network. iQSM+ accepts single-echo and multi-echo phase + (optional) magnitude inputs.
 
+**Jump to:** [Highlights](#highlights) · [Layout](#layout) · [Overview](#overview) · [Quick Start](#quick-start) · [DICOM → NIfTI conversion](#dicom--nifti-conversion) · [Web App](#web-app) · [Command-Line Interface](#command-line-interface) · [Run Demo Examples](#run-demo-examples) · [Troubleshooting](#troubleshooting) · [Citation](#citation)
+
 ## Highlights
 
 - **Orientation-aware reconstruction** — the OA-LFE encoder consumes a B0 direction vector, so non-axial scans (oblique, sagittal, coronal) reconstruct correctly without any re-sampling.
