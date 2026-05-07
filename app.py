@@ -154,7 +154,7 @@ def _detect_echoes_from_paths(paths):
 # Slice-image rendering
 # ---------------------------------------------------------------------------
 
-@lru_cache(maxsize=16)
+@lru_cache(maxsize=64)
 def _volume_array(nii_path):
     return nib.load(str(nii_path)).get_fdata().astype(np.float32)
 
@@ -1568,7 +1568,11 @@ with gr.Blocks(title="iQSM+", analytics_enabled=False) as app:
             except OSError: pass
         qsm_out = out_dir / f"iQSM_plus_recombined_{sel_tag}.nii.gz"
         nib.save(nib.Nifti1Image(qsm_avg.astype(np.float32), affine), str(qsm_out))
-        _volume_array.cache_clear()
+        # Don't clear _volume_array's cache here — wiping it forces every
+        # subsequent recombine to re-read all per-echo NIfTIs from disk
+        # (~hundreds of MB per echo). The recombined filename is versioned
+        # by selection and same-selection recombine is deterministic, so
+        # leaving the cache alone is safe.
 
         new_state = dict(state)
         new_state["qsm_path"] = str(qsm_out)
