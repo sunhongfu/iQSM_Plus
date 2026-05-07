@@ -579,6 +579,18 @@ def _visibility_updates(job):
     )
 
 
+def _qsm_image_update(job):
+    """gr.update for img_qsm — refreshes both the rendered slice and the
+    label so the title above the image reflects the actual filename
+    (e.g. "iQSM_plus.nii.gz" or "iQSM_plus_recombined_e2_e3.nii.gz" after
+    a recombine)."""
+    img = job.get("qsm_image")
+    qpath = job.get("qsm_path")
+    if qpath:
+        return gr.update(value=img, label=f"QSM — {Path(qpath).name}")
+    return img
+
+
 def _stream_job(job):
     log = ""
     while True:
@@ -589,13 +601,13 @@ def _stream_job(job):
         state, slider = _state_and_slider_update(job)
         v = _visibility_updates(job)
         yield (log, _result_files(job), _result_info_md(job),
-               job.get("qsm_image"),
+               _qsm_image_update(job),
                job.get("phase_image"), job.get("mag_image"), job.get("mask_image"),
                state, slider, *v)
     state, slider = _state_and_slider_update(job)
     v = _visibility_updates(job)
     yield (log, _result_files(job), _result_info_md(job),
-           job.get("qsm_image"),
+           _qsm_image_update(job),
            job.get("phase_image"), job.get("mag_image"), job.get("mask_image"),
            state, slider, *v)
 
@@ -1206,13 +1218,13 @@ with gr.Blocks(title="iQSM+", analytics_enabled=False) as app:
             # Auto-windowed; not affected by the QSM slider window.
             with gr.Row(visible=False) as orientation_row:
                 img_phase = gr.Image(
-                    label="Raw phase — last echo (no mask)",
+                    label="Raw phase — last echo",
                     show_download_button=False,
                     show_fullscreen_button=False,
                     height=300, visible=False,
                 )
                 img_mag = gr.Image(
-                    label="Raw magnitude — last echo (no mask)",
+                    label="Raw magnitude — last echo",
                     show_download_button=False,
                     show_fullscreen_button=False,
                     height=300, visible=False,
@@ -1604,7 +1616,8 @@ with gr.Blocks(title="iQSM+", analytics_enabled=False) as app:
             for p in files:
                 zf.write(p, arcname=Path(p).name)
 
-        return (status, files, qsm_img, new_state,
+        qsm_img_update = gr.update(value=qsm_img, label=f"QSM — {Path(qsm_out).name}")
+        return (status, files, qsm_img_update, new_state,
                 shape_summary(files), gr.update(value=str(zip_path), visible=True))
 
     recombine_btn.click(
