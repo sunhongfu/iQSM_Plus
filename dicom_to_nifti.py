@@ -2,18 +2,16 @@
 """
 dicom_to_nifti — convert GRE DICOM(s) into NIfTI files + a params.json.
 
-This script is intentionally **independent of the downstream pipeline**: the
-exact same file ships with iQSM, iQSM+, and DeepRelaxo, and produces a
-generic output bundle (phase + magnitude NIfTIs + a `params.json`) that any
-of the three pipelines — or any other QSM / R2* tool — can consume.
+A standalone, self-contained converter. It depends only on numpy, nibabel,
+and pydicom — no project-local imports — and produces a generic output
+bundle (phase / magnitude NIfTIs + a `params.json`) that any downstream
+QSM / R2* / mapping pipeline can consume.
 
-Works for both single-echo and multi-echo gradient-echo acquisitions, and for
-whatever subset of the four modalities a scanner exports:
+Works for both single-echo and multi-echo gradient-echo acquisitions, and
+for whatever subset of the four modalities a scanner exports:
 
-  • phase only          → phase NIfTI written (fine for iQSM / iQSM+; the
-                           multi-echo combiner falls back to TE²-only
-                           weighting when no magnitude is available).
-  • magnitude only      → magnitude NIfTI written (fine for DeepRelaxo).
+  • phase only          → phase NIfTI written.
+  • magnitude only      → magnitude NIfTI written.
   • phase + magnitude   → both written.
   • real + imaginary    → phase and magnitude derived from the complex
                            signal:  phase = angle(R + 1j·I),
@@ -32,8 +30,9 @@ single-echo, 4D for multi-echo) plus a `params.json` containing TE(s),
 voxel size, B0 strength, and B0 direction (in image coordinates).
 
 `params.json` also contains *copy-paste strings* (`te_ms_string`,
-`voxel_size_string`, `b0_dir_string`) formatted exactly the way the three
-web apps expect their input fields, so users can paste them straight in.
+`voxel_size_string`, `b0_dir_string`) formatted to match the conventional
+input-field formats used by typical QSM / mapping web tools, so users can
+paste them straight in.
 
 Run `python dicom_to_nifti.py --help` for usage examples.
 """
@@ -60,11 +59,10 @@ examples:
   python dicom_to_nifti.py --phase_dir /path/to/phase \\
                            --mag_dir   /path/to/magnitude
 
-  # Phase only (fine for iQSM / iQSM+ when magnitude isn't available —
-  # multi-echo combination falls back to TE²-only weighting):
+  # Phase only:
   python dicom_to_nifti.py --phase_dir /path/to/phase
 
-  # Magnitude only (fine for DeepRelaxo, which uses magnitude only):
+  # Magnitude only:
   python dicom_to_nifti.py --mag_dir /path/to/magnitude
 
   # Real and imaginary exported as two separate folders:
@@ -450,8 +448,8 @@ def _convert(file_paths, output_dir, chopper="auto"):
                     affine = aff
             meta_groups = phase_groups
         else:
-            # Magnitude-only run (e.g. for DeepRelaxo). Use mag DICOMs as the
-            # canonical metadata source; no phase output.
+            # Magnitude-only run. Use mag DICOMs as the canonical metadata
+            # source; no phase output.
             counts = {te: len(items) for te, items in mag_groups.items()}
             if len(set(counts.values())) > 1:
                 details = "\n".join(f"    TE = {te:g} ms : {n} slices"
@@ -574,25 +572,21 @@ def main():
     parser.add_argument(
         "--dicom_dir", metavar="DIR",
         help="A single folder of DICOMs. Any subset of the four modalities "
-             "is accepted — phase only (iQSM / iQSM+ without magnitude), "
-             "magnitude only (DeepRelaxo), phase + magnitude, real + "
-             "imaginary, all four mixed, etc. Modalities are auto-split by "
-             "ImageType / ComplexImageComponent / GE private tag. When "
-             "real + imaginary form a complete pair, they're preferred "
-             "over explicit phase / magnitude DICOMs.",
+             "is accepted — phase only, magnitude only, phase + magnitude, "
+             "real + imaginary, all four mixed, etc. Modalities are "
+             "auto-split by ImageType / ComplexImageComponent / GE private "
+             "tag. When real + imaginary form a complete pair, they're "
+             "preferred over explicit phase / magnitude DICOMs.",
     )
     parser.add_argument(
         "--phase_dir", metavar="DIR",
         help="Folder containing only phase DICOMs. Can be used alone "
-             "(phase-only output, fine for iQSM / iQSM+ when magnitude "
-             "isn't available — multi-echo combination then falls back to "
-             "TE²-only weighting) or paired with --mag_dir.",
+             "(phase-only output) or paired with --mag_dir.",
     )
     parser.add_argument(
         "--mag_dir", metavar="DIR",
         help="Folder containing only magnitude DICOMs. Can be used alone "
-             "(magnitude-only output, fine for DeepRelaxo) or paired with "
-             "--phase_dir.",
+             "(magnitude-only output) or paired with --phase_dir.",
     )
     parser.add_argument(
         "--real_dir", metavar="DIR",
@@ -636,10 +630,9 @@ def main():
             "OR --phase_dir / --mag_dir (either or both) OR --real_dir + "
             "--imag_dir. Don't combine modes."
         )
-    # phase / magnitude are independently usable — only one of the two is
-    # strictly required (phase-only is fine for iQSM / iQSM+; magnitude-only
-    # is fine for DeepRelaxo). Real + imaginary, in contrast, must always be
-    # paired since the complex signal can't be formed from one alone.
+    # phase / magnitude are independently usable — either one alone is a
+    # valid run. Real + imaginary, in contrast, must always be paired since
+    # the complex signal can't be formed from one alone.
     if has_ri and (args.real_dir is None or args.imag_dir is None):
         parser.error("--real_dir and --imag_dir must be supplied together.")
 
