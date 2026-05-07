@@ -611,7 +611,7 @@ def run_pipeline(phase_files, te_ms_str, mag_files, mask_file,
         try:
             voxel_size = [float(v) for v in voxel_str.replace(",", " ").split()]
         except ValueError:
-            yield ("❌ Invalid voxel size — enter three numbers, e.g. 1 1 2", *_noop)
+            yield ("❌ Invalid voxel size — enter three numbers separated by spaces or commas, e.g. 1 1 2 or 1, 1, 2", *_noop)
             return
         if len(voxel_size) != 3:
             yield ("❌ Voxel size must have exactly 3 values (x y z)", *_noop)
@@ -625,7 +625,7 @@ def run_pipeline(phase_files, te_ms_str, mag_files, mask_file,
         try:
             b0_dir = [float(v) for v in b0dir_str.replace(",", " ").split()]
         except ValueError:
-            yield ("❌ Invalid B0 direction — enter three numbers, e.g. 0 0 1", *_noop)
+            yield ("❌ Invalid B0 direction — enter three numbers separated by spaces or commas, e.g. 0 0 1 or 0, 0, 1", *_noop)
             return
         if len(b0_dir) != 3:
             yield ("❌ B0 direction must have exactly 3 values (x y z)", *_noop)
@@ -1001,15 +1001,19 @@ with gr.Blocks(title="iQSM+", analytics_enabled=False) as app:
             with gr.Row():
                 voxel_str = gr.Textbox(
                     label="Voxel size (mm) — x y z",
-                    placeholder="e.g. 1 1 2  (blank → from NIfTI header)",
+                    placeholder="e.g.  1 1 2    or    1, 1, 2",
+                    info="Three numbers, comma- or space-separated. "
+                         "Leave blank to read from the NIfTI header.",
                 )
                 b0_val = gr.Number(value=3.0, label="B0 (Tesla)",
                                    minimum=0.1, maximum=14.0, step=0.5)
             b0dir_str = gr.Textbox(
                 label="B0 direction — x y z (unit vector)",
-                placeholder="e.g.  0.1 0.0 0.995   (blank → [0 0 1] / read from DICOM)",
-                info="iQSM+ adapts to non-axial acquisitions via this vector. "
-                     "Auto-filled from DICOM headers; for NIfTI input, leave blank for axial scans.",
+                placeholder="e.g.  0.1 0.0 0.995    or    0.1, 0.0, 0.995",
+                info="Three numbers, comma- or space-separated. "
+                     "iQSM+ adapts to non-axial acquisitions via this vector. "
+                     "Auto-filled from DICOM headers; leave blank for axial scans "
+                     "(defaults to 0 0 1).",
             )
             with gr.Row():
                 eroded_rad = gr.Slider(
