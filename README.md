@@ -251,9 +251,9 @@ Two side-by-side upload buttons:
 - **Add Phase NIfTI / MAT** (left, required)
 - **Add Magnitude NIfTI / MAT (optional)** (right)
 
-Each accepts one 4D file or multiple 3D files (one per echo). Supported: `.nii`, `.nii.gz`, `.mat` (v5 or v7.3).
+Each accepts **single-echo** (one 3D file) or **multi-echo** input (multiple 3D files — one per echo — or a single 4D volume). Supported: `.nii`, `.nii.gz`, `.mat` (v5 or v7.3).
 
-**Phase is required.** **Magnitude is optional** — used for magnitude × TE² weighted averaging on multi-echo input; without it, multi-echo falls back to TE²-only weighting (uniform magnitude). The combiner runs externally (in `run.py` / `app.py`), so per-echo iQSM+ outputs are kept on disk and the web app's Echo Selection panel can recombine subsets without re-running inference.
+**Phase is required.** **Magnitude is optional** — used for magnitude × TE² weighted averaging on multi-echo input; without it, multi-echo falls back to TE²-only weighting (uniform magnitude). Single-echo runs don't combine anything, so magnitude only shows up in the orientation-preview panel after the run. The combiner runs externally (in `run.py` / `app.py`), so per-echo iQSM+ outputs are kept on disk and the web app's Echo Selection panel can recombine subsets without re-running inference.
 
 Have raw DICOMs? See [DICOM → NIfTI conversion](#dicom--nifti-conversion).
 

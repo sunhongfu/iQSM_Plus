@@ -1009,8 +1009,13 @@ with gr.Blocks(title="iQSM+", analytics_enabled=False) as app:
         with gr.Accordion("Phase + Magnitude Input", open=True,
                           elem_classes=["dr-section", "dr-accordion"]):
             gr.Markdown(
-                "Raw (wrapped) phase is required. Magnitude is optional "
-                "(used for weighted multi-echo combination only). "
+                "GRE phase + (optional) magnitude — **single-echo** (one 3D file) "
+                "or **multi-echo** (multiple 3D files, one per echo, **or** a single "
+                "4D volume). Supported: `.nii`, `.nii.gz`, `.mat` (v5 / v7.3).\n\n"
+                "Raw (wrapped) phase is required. Magnitude is optional — used for "
+                "magnitude × TE² weighted combination on multi-echo input; "
+                "single-echo runs and the orientation-preview panel after the run "
+                "are the only places it shows up otherwise.\n\n"
                 "Have raw DICOMs? See "
                 "[DICOM → NIfTI conversion]"
                 "(https://github.com/sunhongfu/iQSM_Plus#dicom--nifti-conversion) "
