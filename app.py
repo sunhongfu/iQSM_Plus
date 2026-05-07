@@ -1,15 +1,10 @@
 """
 iQSM+ — Gradio web app for orientation-adaptive Quantitative Susceptibility Mapping.
 
-Layout mirrors DeepRelaxo's web app:
-  - DICOM Folder tab (recommended) + NIfTI / MAT files tab
-  - Processing Order panel with per-file shape verification
-  - Echo Times dual-format input (comma list OR `first:spacing:count`)
-  - Optional magnitude (used for weighted multi-echo combination only)
-  - Optional brain mask with shape comparison
-  - Acquisition + Hyper-parameters (B0, B0 direction, voxel size, mask erosion)
-  - Run Pipeline → Log / Results / Visualisation panels
-  - Slice slider, dark-mode auto-open, port auto-fallback, GPU cleanup
+Panels: Phase + Magnitude Input (NIfTI / MAT — single-echo or multi-echo) ·
+Echo Order (auto-expands only on multi-file uploads) · Echo Times ·
+Brain Mask · Acquisition + Hyper-parameters (B0, B0 direction, voxel size,
+mask erosion) · Run · Log · Echo Selection · Visualisation · Results.
 """
 
 import re
@@ -1041,18 +1036,16 @@ with gr.Blocks(title="iQSM+", analytics_enabled=False) as app:
                     )
                     mag_status = gr.Markdown("")
 
-        # ── 2. Processing Order ─────────────────────────────────────
-        with gr.Accordion("Processing Order", open=False,
+        # ── 2. Echo Order ────────────────────────────────────────────
+        with gr.Accordion("Echo Order", open=False,
                           elem_classes=["dr-section", "dr-accordion"]) as order_group:
             gr.Markdown(
-                "**Only relevant when you uploaded multiple 3D files (one per echo) "
-                "for a multi-echo dataset** — this panel sets the order in which "
-                "those echoes are processed. Files are sorted naturally by filename "
-                "(`mag1`, `mag2`, …, `mag10`); rename them if the auto-sort gets it "
-                "wrong. **Skip this panel if you uploaded a single 4D volume** "
-                "(echo order is already baked into the file's last dimension) or a "
-                "single-echo 3D file. When both modalities are supplied as 3D-per-"
-                "echo files, the two columns must have matching echo counts."
+                "Sets the order in which echoes are processed. **Only relevant when "
+                "you uploaded multiple 3D files (one per echo) for a multi-echo "
+                "dataset.** Files are sorted naturally by filename (`mag1`, `mag2`, "
+                "…, `mag10`); rename them if the auto-sort gets it wrong. When both "
+                "modalities are supplied as 3D-per-echo files, the two columns must "
+                "have matching echo counts."
             )
             with gr.Row(equal_height=True):
                 with gr.Column():
@@ -1333,12 +1326,15 @@ with gr.Blocks(title="iQSM+", analytics_enabled=False) as app:
             v = _voxel_from_first_nii(new_paths)
             if v:
                 voxel_update = gr.update(value=v)
-        return (updated, srt or None, summary, None, gr.update(open=True),
+        # Auto-expand only when multiple 3D files were uploaded — single-file
+        # (3D or 4D) uploads leave the panel as the user left it.
+        order_open = gr.update(open=True) if len(srt) >= 2 else gr.update()
+        return (updated, srt or None, summary, None, order_open,
                 status, _clear_btn_update(len(srt)), voxel_update)
 
     phase_input.click(
         lambda: _RED_WAIT.format(
-            msg="⏳ Waiting for phase file selection / upload — Processing Order will populate "
+            msg="⏳ Waiting for phase file selection / upload — Echo Order will populate "
                 "after the file transfer completes…"
         ),
         outputs=phase_status,
@@ -1357,8 +1353,9 @@ with gr.Blocks(title="iQSM+", analytics_enabled=False) as app:
         if not files:
             return [], None, "", gr.update(), _clear_btn_update(0)
         paths = [str(_to_path(f)) for f in files]
+        # Removal: don't change the open state (only uploads auto-expand).
         return (paths, paths, shape_summary(paths),
-                gr.update(open=True), _clear_btn_update(len(paths)))
+                gr.update(), _clear_btn_update(len(paths)))
 
     sorted_files.change(
         sync_after_remove, inputs=[sorted_files],
@@ -1417,12 +1414,14 @@ with gr.Blocks(title="iQSM+", analytics_enabled=False) as app:
         else:
             status = (f"✅ Added {len(added_names)} magnitude files:\n\n"
                       + "\n".join(f"- `{n}`" for n in added_names))
-        return (updated, srt or None, shape_summary(srt), None, gr.update(open=True),
+        # Auto-expand only when multiple 3D files were uploaded.
+        order_open = gr.update(open=True) if len(srt) >= 2 else gr.update()
+        return (updated, srt or None, shape_summary(srt), None, order_open,
                 status, _clear_btn_update(len(srt)))
 
     mag_button.click(
         lambda: _RED_WAIT.format(
-            msg="⏳ Waiting for magnitude file selection / upload — Processing Order will "
+            msg="⏳ Waiting for magnitude file selection / upload — Echo Order will "
                 "populate after the file transfer completes…"
         ),
         outputs=mag_status,
@@ -1440,8 +1439,9 @@ with gr.Blocks(title="iQSM+", analytics_enabled=False) as app:
         if not files:
             return [], None, "", gr.update(), _clear_btn_update(0)
         paths = [str(_to_path(f)) for f in files]
+        # Removal: don't change the open state (only uploads auto-expand).
         return (paths, paths, shape_summary(paths),
-                gr.update(open=True), _clear_btn_update(len(paths)))
+                gr.update(), _clear_btn_update(len(paths)))
 
     sorted_mag_files.change(
         sync_mag_after_remove, inputs=[sorted_mag_files],
