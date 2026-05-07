@@ -193,7 +193,7 @@ def _interpolate_volume(vol: np.ndarray, vox: np.ndarray) -> np.ndarray:
 
 def run_iqsm_plus(
     phase_nii_path: str,
-    te_values: list,
+    te: float,
     *,
     mag_nii_path: str | None = None,
     mask_nii_path: str | None = None,
@@ -206,18 +206,26 @@ def run_iqsm_plus(
     progress_fn=None,
 ) -> str:
     """
-    Run iQSM+ QSM reconstruction in pure Python.
+    Run iQSM+ QSM reconstruction in pure Python — single-echo.
+
+    Multi-echo combination (magnitude × TE² weighted averaging) is handled
+    *externally* by the caller (see run.py / app.py), exactly as in iQSM:
+    one call to this function per echo, then combine the per-echo χ
+    volumes. Keeping the combiner outside the model also enables the web
+    app's "Echo Selection" panel to recombine subsets without re-running
+    inference.
 
     Parameters
     ----------
     phase_nii_path : str
-        Path to wrapped-phase NIfTI file (3D single-echo or 4D multi-echo).
+        Path to wrapped-phase NIfTI file (3D, single-echo).
         Phase convention: phase = -delta_B * gamma * TE.
         If your data uses the opposite sign, negate before calling.
-    te_values : list of float
-        Echo time(s) in **seconds**, e.g. [0.020] or [0.004, 0.008, …].
+    te : float
+        Echo time in **seconds**, e.g. 0.020.
     mag_nii_path : str, optional
-        Path to magnitude NIfTI (same spatial dims as phase).
+        Unused by iQSM+ inference — kept for signature parity with iQSM.
+        Magnitude is consumed only by the external multi-echo combiner.
     mask_nii_path : str, optional
         Path to brain-mask NIfTI (3D). If not provided, whole volume is used.
     voxel_size : [x, y, z] mm, optional
@@ -277,31 +285,24 @@ def run_iqsm_plus(
     b0_dir = np.array(b0_dir, dtype=np.float64)
     b0_dir = b0_dir / np.linalg.norm(b0_dir)
 
-    # TE as numpy array column vector (matches MATLAB TE')
-    te = np.array(te_values, dtype=np.float32).reshape(-1)
+    # TE as a 1-element numpy vector (model expects a tensor)
+    te_arr = np.array([float(te)], dtype=np.float32)
 
-    # Ensure phase is single-precision
+    # Ensure phase is single-precision and 3D
     phase = phase.astype(np.float32)
-
-    # Handle single-echo: add echo dim for uniform handling
-    single_echo = phase.ndim == 3
-    if single_echo:
-        phase = phase[:, :, :, np.newaxis]
+    if phase.ndim != 3:
+        raise ValueError(
+            f"run_iqsm_plus expects a 3D phase volume, got shape {phase.shape}. "
+            "Multi-echo runs should call this function once per echo and "
+            "combine outputs externally (see run.py / app.py)."
+        )
 
     imsize_orig = np.array(phase.shape[:3], dtype=int)  # (H, W, D)
-    n_echoes = phase.shape[3]
 
     # ------------------------------------------------------------------
-    # 2. Load magnitude and mask (optional)
+    # 2. Load brain mask (optional). Magnitude is unused by iQSM+
+    #    inference — it's consumed only by the external multi-echo combiner.
     # ------------------------------------------------------------------
-    if mag_nii_path is not None:
-        _log(0.08, "Loading magnitude NIfTI …")
-        mag = nib.load(mag_nii_path).get_fdata(dtype=np.float32)
-        if mag.ndim == 3:
-            mag = mag[:, :, :, np.newaxis]
-    else:
-        mag = np.ones_like(phase)
-
     if mask_nii_path is not None:
         _log(0.10, "Loading brain mask NIfTI …")
         mask = nib.load(mask_nii_path).get_fdata(dtype=np.float32)
@@ -321,7 +322,6 @@ def run_iqsm_plus(
     if interp_flag:
         _log(0.15, "Interpolating to isotropic resolution …")
         phase = _interpolate_phase_to_isotropic(phase, vox)
-        mag = _interpolate_volume(mag, vox)
         mask = _interpolate_volume(mask, vox)
         vox_iso = np.full(3, vox.min())
         imsize_iso = np.array(phase.shape[:3], dtype=int)
@@ -340,13 +340,12 @@ def run_iqsm_plus(
     permute_flag = abs(b0_dir[1]) > abs(b0_dir[2])
     if permute_flag:
         b0_dir[[1, 2]] = b0_dir[[2, 1]]
-        phase = np.transpose(phase, (0, 2, 1, 3))
-        mag = np.transpose(mag, (0, 2, 1, 3))
-        mask = np.transpose(mask, (1, 0, 2))  # mask is 3D
+        phase = np.transpose(phase, (0, 2, 1))
+        mask  = np.transpose(mask,  (1, 0, 2))
 
     # 3e. Crop to brain bounding box (+ 16-voxel context padding)
     bbox = _brain_bbox(mask, pad=16)
-    phase_crop = phase[bbox + (slice(None),)]   # (H_c, W_c, D_c, N)
+    phase_crop = phase[bbox]                    # (H_c, W_c, D_c)
     mask_crop  = mask[bbox]                     # (H_c, W_c, D_c)
     _log(0.22, f"Cropped volume: {phase.shape[:3]} → {phase_crop.shape[:3]}")
 
@@ -362,34 +361,21 @@ def run_iqsm_plus(
 
     _log(0.30, "Running reconstruction …")
 
-    te_t = torch.from_numpy(te).float().to(device)
+    te_t = torch.from_numpy(te_arr).float().to(device)      # shape (1,)
     b0_t = torch.tensor([b0], dtype=torch.float32).to(device)
     z_prjs_t = torch.from_numpy(b0_dir.astype(np.float32)).unsqueeze(0).unsqueeze(0).to(device)  # (1, 1, 3)
 
-    # phase_pad shape: (H, W, D, N_echoes)
-    phase_t = torch.from_numpy(phase_pad).float()           # (H, W, D, N)
-    phase_t = phase_t.permute(3, 0, 1, 2).unsqueeze(1)     # (N, 1, H, W, D)
-    phase_t = phase_t.to(device)
+    # phase_pad shape: (H, W, D)
+    phase_t = torch.from_numpy(phase_pad).float()           # (H, W, D)
+    phase_t = phase_t.unsqueeze(0).unsqueeze(0).to(device)  # (1, 1, H, W, D)
 
     mask_t = torch.from_numpy(mask_pad).float()
-    mask_t = mask_t.unsqueeze(0).unsqueeze(0).to(device)   # (1, 1, H, W, D)
-
-    pred_chi = torch.zeros_like(phase_t)  # (N, 1, H, W, D)
+    mask_t = mask_t.unsqueeze(0).unsqueeze(0).to(device)    # (1, 1, H, W, D)
 
     with torch.inference_mode():
-        for i in range(n_echoes):
-            _log(
-                0.30 + 0.50 * (i / n_echoes),
-                f"Reconstructing echo {i + 1}/{n_echoes} …",
-            )
-            tmp_img = phase_t[i].unsqueeze(0)   # (1, 1, H, W, D)
-            tmp_te = te_t[i]
-            pred_chi[i] = model(tmp_img, mask_t, tmp_te, b0_t, z_prjs_t)
+        pred_chi = model(phase_t, mask_t, te_t, b0_t, z_prjs_t) * mask_t  # (1, 1, H, W, D)
 
-    pred_chi = pred_chi * mask_t                            # apply mask
-    pred_chi = pred_chi.squeeze(1)                         # (N, H, W, D)
-    pred_chi = pred_chi.permute(1, 2, 3, 0)               # (H, W, D, N)
-    pred_chi = pred_chi.cpu().numpy().astype(np.float32)
+    pred_chi = pred_chi.squeeze().cpu().numpy().astype(np.float32)        # (H, W, D)
 
     # ------------------------------------------------------------------
     # 5. Post-processing
@@ -397,28 +383,15 @@ def run_iqsm_plus(
     _log(0.82, "Post-processing …")
 
     # 5a. Remove zero-padding from cropped result, paste back into full volume
-    chi_crop = _zero_remove(pred_chi, positions)           # (H_c, W_c, D_c, N)
-    chi = np.zeros((*phase.shape[:3], n_echoes), dtype=np.float32)
-    chi[bbox + (slice(None),)] = chi_crop                  # (H, W, D, N)
+    chi_crop = _zero_remove(pred_chi, positions)            # (H_c, W_c, D_c)
+    chi_fitted = np.zeros(phase.shape[:3], dtype=np.float32)
+    chi_fitted[bbox] = chi_crop                             # (H, W, D)
 
-    # 5b. Multi-echo magnitude+TE-weighted fitting → single QSM map
-    # mag is already at full spatial size (H, W, D, N) — no trimming needed
-    if n_echoes > 1:
-        te_bc = te.reshape(1, 1, 1, -1)
-        mag_echo = mag if mag.ndim == 4 else mag[:, :, :, np.newaxis]
-        weights = (mag_echo * te_bc) ** 2
-        denom = weights.sum(axis=3, keepdims=True)
-        denom[denom == 0] = 1.0
-        chi_fitted = (weights * chi).sum(axis=3) / denom.squeeze(3)
-        chi_fitted = np.nan_to_num(chi_fitted)
-    else:
-        chi_fitted = chi[:, :, :, 0]
-
-    # 5c. Undo dimension permutation
+    # 5b. Undo dimension permutation
     if permute_flag:
         chi_fitted = np.transpose(chi_fitted, (0, 2, 1))
 
-    # 5d. Undo isotropic interpolation (back to original resolution)
+    # 5c. Undo isotropic interpolation (back to original resolution)
     if interp_flag:
         factors = (imsize_orig / imsize_iso).tolist()
         chi_fitted = zoom(chi_fitted, factors, order=1)

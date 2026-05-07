@@ -96,13 +96,98 @@ def _stage_input(path, work_dir, suffix=""):
     return src
 
 
-def _combine_3d_to_4d(paths, out_path):
-    """Stack a list of 3D NIfTIs into a single 4D NIfTI."""
-    imgs = [nib.load(str(p)) for p in paths]
-    affine = imgs[0].affine
-    data = np.stack([img.get_fdata(dtype=np.float32) for img in imgs], axis=-1)
-    nib.save(nib.Nifti1Image(data, affine), str(out_path))
-    return out_path
+# ---------------------------------------------------------------------------
+# 4D NIfTI → per-echo 3D files
+# ---------------------------------------------------------------------------
+
+def _split_4d(path, work_dir):
+    img = nib.load(str(path))
+    data = img.get_fdata(dtype=np.float32)
+    if data.ndim != 4:
+        return [path]
+    out = []
+    for i in range(data.shape[3]):
+        p = Path(work_dir) / f"phase_echo{i+1}.nii.gz"
+        nib.save(nib.Nifti1Image(data[:, :, :, i], img.affine), str(p))
+        out.append(p)
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Multi-echo combiner — runs run_iqsm_plus() per echo and averages outputs
+# ---------------------------------------------------------------------------
+
+def _run_multi_echo(phase_paths, te_values_s, mag_path, mask_path, voxel_size,
+                    b0, b0_dir, eroded_rad, phase_sign, output_dir):
+    """Run iQSM+ on each echo and combine with magnitude × TE² weighting (or
+    TE²-only weighting if no magnitude). Returns the combined QSM path."""
+    from inference import run_iqsm_plus
+
+    work_dir = Path(output_dir)
+    work_dir.mkdir(parents=True, exist_ok=True)
+
+    # If magnitude is 4D, split into per-echo files
+    mag_per_echo = [None] * len(phase_paths)
+    if mag_path:
+        mag_img = nib.load(str(mag_path))
+        mag_data = mag_img.get_fdata(dtype=np.float32)
+        if mag_data.ndim == 4:
+            if mag_data.shape[3] != len(phase_paths):
+                raise ValueError(
+                    f"Magnitude has {mag_data.shape[3]} echoes but phase has "
+                    f"{len(phase_paths)} — counts must match."
+                )
+            for i in range(mag_data.shape[3]):
+                p = work_dir / f"mag_echo{i+1}.nii.gz"
+                nib.save(nib.Nifti1Image(mag_data[:, :, :, i], mag_img.affine), str(p))
+                mag_per_echo[i] = str(p)
+        else:
+            # 3D magnitude → reuse for every echo
+            mag_per_echo = [str(mag_path)] * len(phase_paths)
+
+    qsm_volumes = []
+    affine = None
+    for i, (ppath, te_s) in enumerate(zip(phase_paths, te_values_s)):
+        print(f"\n--- Echo {i+1}/{len(phase_paths)}  (TE = {te_s*1000:g} ms) ---")
+        echo_out = work_dir / f"echo{i+1}_output"
+        q_path = run_iqsm_plus(
+            phase_nii_path=str(ppath),
+            te=float(te_s),
+            mask_nii_path=str(mask_path) if mask_path else None,
+            voxel_size=voxel_size,
+            b0=b0,
+            b0_dir=b0_dir,
+            eroded_rad=eroded_rad,
+            phase_sign=phase_sign,
+            output_dir=str(echo_out),
+        )
+        q_img = nib.load(q_path)
+        if affine is None:
+            affine = q_img.affine
+        qsm_volumes.append(q_img.get_fdata(dtype=np.float32))
+
+    print(f"\nAveraging {len(qsm_volumes)} echoes …")
+    qsm_stack = np.stack(qsm_volumes, axis=-1)
+
+    te_bc = np.array(te_values_s, dtype=np.float32).reshape(1, 1, 1, -1)
+    if mag_path and all(m is not None for m in mag_per_echo):
+        print("  Magnitude × TE² weighted averaging")
+        mag_data = np.stack(
+            [nib.load(m).get_fdata(dtype=np.float32) for m in mag_per_echo],
+            axis=-1,
+        )
+        weights = (mag_data * te_bc) ** 2
+        denom = weights.sum(axis=-1, keepdims=True)
+        denom[denom == 0] = 1.0
+        qsm_avg = (weights * qsm_stack).sum(axis=-1) / denom.squeeze(-1)
+    else:
+        print("  TE² weighted averaging (no magnitude — uniform mag)")
+        weights = te_bc ** 2
+        qsm_avg = (qsm_stack * weights).sum(axis=-1) / weights.sum()
+
+    qsm_path = str(work_dir / "iQSM_plus.nii.gz")
+    nib.save(nib.Nifti1Image(qsm_avg.astype(np.float32), affine), qsm_path)
+    return qsm_path
 
 
 # ---------------------------------------------------------------------------
@@ -144,9 +229,9 @@ def _build_parser():
 
     parser.add_argument("--mag", metavar="FILE",
                         help="Optional magnitude NIfTI / MAT (3D or 4D). "
-                             "Used internally by iQSM+ for magnitude × TE² weighted "
-                             "multi-echo fitting; if omitted, iQSM+ falls back to "
-                             "uniform magnitude (TE²-only weighting).")
+                             "Used for magnitude × TE² weighted averaging on "
+                             "multi-echo input; without it, multi-echo falls back "
+                             "to TE²-only weighting (uniform magnitude).")
     parser.add_argument("--mask", metavar="FILE",
                         help="Brain mask NIfTI / MAT (optional; ones if omitted).")
     parser.add_argument("--bet_mask", metavar="FILE",
@@ -244,8 +329,8 @@ def main():
 
     work_dir = Path(tempfile.mkdtemp(prefix="iqsmplus_run_"))
 
-    # ── Resolve phase input ─────────────────────────────────────────────
-    phase_input_path = None      # path passed to run_iqsm_plus (3D or 4D)
+    # ── Resolve phase files + TE values ─────────────────────────────────
+    phase_paths = []
     te_values_s = None
     mag_path_resolved = None
     b0_dir_value = list(args.b0_dir) if args.b0_dir is not None else None
@@ -269,9 +354,11 @@ def main():
         phase_path = cdir / phase_nii
         if not phase_path.exists():
             parser.error(f"Phase file missing: {phase_path}")
-        phase_input_path = str(phase_path)
         if mag_nii and (cdir / mag_nii).exists():
             mag_path_resolved = str(cdir / mag_nii)
+        # Split if 4D
+        phase_paths = (_split_4d(phase_path, work_dir)
+                       if len(params.get("te_ms", [])) > 1 else [phase_path])
         te_values_s = [float(t) / 1000.0 for t in params.get("te_ms", [])]
         if args.voxel_size is None and params.get("voxel_size_mm"):
             args.voxel_size = params["voxel_size_mm"]
@@ -304,9 +391,17 @@ def main():
             parser.error("when using --echo_4d, provide --te_ms or --te")
         src = _resolve_path(data_dir, args.echo_4d)
         staged = _stage_input(src, work_dir)
-        phase_input_path = str(staged)
-        te_values_s = ([t / 1000.0 for t in args.te_ms] if args.te_ms
-                       else list(args.te))
+        phase_paths = _split_4d(staged, work_dir)
+        if len(phase_paths) == 1:
+            te_values_s = ([args.te_ms[0] / 1000.0] if args.te_ms else [args.te[0]])
+        else:
+            te_values_s = ([t / 1000.0 for t in args.te_ms] if args.te_ms
+                           else list(args.te))
+            if len(te_values_s) != len(phase_paths):
+                parser.error(
+                    f"Number of TEs ({len(te_values_s)}) does not match "
+                    f"echoes in --echo_4d ({len(phase_paths)})."
+                )
 
     elif args.echo_files:
         if args.te_ms is None and args.te is None:
@@ -315,28 +410,42 @@ def main():
                        else list(args.te))
         if len(args.echo_files) != len(te_values_s):
             parser.error("--echo_files and TE counts must match.")
-        staged = []
         for f in args.echo_files:
             src = _resolve_path(data_dir, f)
-            staged.append(_stage_input(src, work_dir))
-        # iQSM+ wants a 4D phase volume — combine the 3D echoes
-        combined = work_dir / "phase_4d.nii.gz"
-        _combine_3d_to_4d(staged, combined)
-        phase_input_path = str(combined)
-        print(f"Combined {len(staged)} 3D echoes into {combined.name}")
+            phase_paths.append(_stage_input(src, work_dir))
 
     else:  # --phase (legacy)
         if args.te_ms is None and args.te is None:
             parser.error("when using --phase, provide --te_ms or --te")
         src = _resolve_path(data_dir, args.phase)
         staged = _stage_input(src, work_dir)
-        phase_input_path = str(staged)
-        te_values_s = ([t / 1000.0 for t in args.te_ms] if args.te_ms
-                       else list(args.te))
+        try:
+            shape = nib.load(str(staged)).shape
+        except Exception:
+            shape = (None,)
+        if len(shape) == 4:
+            phase_paths = _split_4d(staged, work_dir)
+            te_values_s = ([t / 1000.0 for t in args.te_ms] if args.te_ms
+                           else list(args.te))
+            if len(phase_paths) != len(te_values_s):
+                parser.error(
+                    f"Number of TEs ({len(te_values_s)}) does not match "
+                    f"echoes in --phase 4D file ({len(phase_paths)})."
+                )
+        else:
+            phase_paths = [staged]
+            if args.te_ms:
+                if len(args.te_ms) != 1:
+                    parser.error("Single 3D phase requires exactly one TE.")
+                te_values_s = [args.te_ms[0] / 1000.0]
+            else:
+                if len(args.te) != 1:
+                    parser.error("Single 3D phase requires exactly one TE.")
+                te_values_s = [args.te[0]]
 
     # ── Stage magnitude (optional) / mask ──────────────────────────────
-    # Magnitude is unused for single-echo and iQSM+ falls back to mag = 1
-    # internally for multi-echo when not supplied (TE²-only weighting).
+    # Magnitude is unused for single-echo and falls back to TE²-only weighting
+    # for multi-echo when not supplied.
     mag_arg = args.mag or mag_path_resolved
     if mag_arg:
         mag_src = _resolve_path(data_dir, mag_arg)
@@ -374,8 +483,13 @@ def main():
     print("=" * 60)
     print("iQSM+ RUN CONFIGURATION")
     print("=" * 60)
-    print(f"Phase file      : {Path(phase_input_path).name}")
-    print(f"Echoes          : {len(te_values_s)}")
+    if len(phase_paths) == 1:
+        print(f"Input mode      : Single 3D phase")
+        print(f"Phase file      : {Path(phase_paths[0]).name}")
+    else:
+        print(f"Input mode      : Multi-echo  ({len(phase_paths)} echoes)")
+        for i, (p, te_s) in enumerate(zip(phase_paths, te_values_s), 1):
+            print(f"  Echo {i}: {Path(p).name}    TE = {te_s*1000:g} ms")
     print(f"TE (s)          : {', '.join(f'{t:g}' for t in te_values_s)}")
     print(f"Magnitude       : {Path(mag_path).name if mag_path else '(none)'}")
     print(f"Brain mask      : {Path(mask_path).name if mask_path else '(none)'}")
@@ -394,18 +508,31 @@ def main():
     # ── Run reconstruction ──────────────────────────────────────────────
     from inference import run_iqsm_plus, CheckpointNotFoundError
     try:
-        qsm_path = run_iqsm_plus(
-            phase_nii_path=phase_input_path,
-            te_values=te_values_s,
-            mag_nii_path=str(mag_path) if mag_path else None,
-            mask_nii_path=str(mask_path) if mask_path else None,
-            voxel_size=args.voxel_size,
-            b0_dir=b0_dir_value,
-            b0=args.b0,
-            eroded_rad=args.eroded_rad,
-            phase_sign=phase_sign,
-            output_dir=str(output_dir),
-        )
+        if len(phase_paths) == 1:
+            qsm_path = run_iqsm_plus(
+                phase_nii_path=str(phase_paths[0]),
+                te=float(te_values_s[0]),
+                mask_nii_path=str(mask_path) if mask_path else None,
+                voxel_size=args.voxel_size,
+                b0_dir=b0_dir_value,
+                b0=args.b0,
+                eroded_rad=args.eroded_rad,
+                phase_sign=phase_sign,
+                output_dir=str(output_dir),
+            )
+        else:
+            qsm_path = _run_multi_echo(
+                phase_paths=phase_paths,
+                te_values_s=te_values_s,
+                mag_path=mag_path,
+                mask_path=mask_path,
+                voxel_size=args.voxel_size,
+                b0=args.b0,
+                b0_dir=b0_dir_value,
+                eroded_rad=args.eroded_rad,
+                phase_sign=phase_sign,
+                output_dir=output_dir,
+            )
     except CheckpointNotFoundError as exc:
         print(f"\nError: {exc}\n", flush=True)
         raise SystemExit(1)

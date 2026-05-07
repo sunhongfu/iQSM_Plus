@@ -5,7 +5,7 @@ Layout mirrors DeepRelaxo's web app:
   - DICOM Folder tab (recommended) + NIfTI / MAT files tab
   - Processing Order panel with per-file shape verification
   - Echo Times dual-format input (comma list OR `first:spacing:count`)
-  - Optional magnitude (improves multi-echo fitting in iQSM+ inference)
+  - Optional magnitude (used for weighted multi-echo combination only)
   - Optional brain mask with shape comparison
   - Acquisition + Hyper-parameters (B0, B0 direction, voxel size, mask erosion)
   - Run Pipeline → Log / Results / Visualisation panels
@@ -298,61 +298,124 @@ def _run_thread(job, work_dir, mode, phase_paths, te_list_ms, mag_path, mask_pat
             _print_run_config(work_dir, mode, phase_paths, te_list_ms, mag_path,
                               mask_path, voxel_size, b0, b0_dir, eroded_rad, phase_sign)
 
-            # iQSM+ accepts a single 3D NIfTI (single-echo) or 4D NIfTI (multi-echo).
-            # If the user supplied per-echo 3D files, stack them into a 4D volume.
-            if mode == "multi" and len(phase_paths) > 1:
+            # Expand 4D phase NIfTI into per-echo 3D files (matches iQSM)
+            if mode == "4d":
                 print("============================")
-                print(f"COMBINING {len(phase_paths)} 3D ECHOES → 4D VOLUME")
+                print("EXTRACTING 4D PHASE VOLUMES")
                 print("============================")
-                imgs = [nib.load(str(p)) for p in phase_paths]
-                affine = imgs[0].affine
-                data_4d = np.stack(
-                    [img.get_fdata(dtype=np.float32) for img in imgs], axis=-1,
-                )
-                combined = work_dir / "phase_4d.nii.gz"
-                nib.save(nib.Nifti1Image(data_4d, affine), str(combined))
-                phase_input_path = str(combined)
-                print(f"  Combined shape: {data_4d.shape}")
-            else:
-                phase_input_path = str(phase_paths[0])
+                img_4d = nib.load(str(phase_paths[0]))
+                data_4d = img_4d.get_fdata(dtype=np.float32)
+                echo_paths = []
+                for i in range(data_4d.shape[3]):
+                    p = work_dir / f"phase_echo{i+1}.nii.gz"
+                    nib.save(nib.Nifti1Image(data_4d[:, :, :, i], img_4d.affine), str(p))
+                    echo_paths.append(p)
+                    print(f"  Echo {i+1}: TE = {te_list_ms[i]} ms")
+                phase_paths = echo_paths
+
+            # Expand 4D magnitude similarly (per-echo 3D mag for the combiner)
+            mag_paths_per_echo = None
+            if mag_path:
+                mag_img = nib.load(mag_path)
+                if len(mag_img.shape) == 4:
+                    print("Expanding 4D magnitude into per-echo volumes …")
+                    mag_data = mag_img.get_fdata(dtype=np.float32)
+                    mag_paths_per_echo = []
+                    for i in range(mag_data.shape[3]):
+                        p = work_dir / f"mag_echo{i+1}.nii.gz"
+                        nib.save(nib.Nifti1Image(mag_data[:, :, :, i], mag_img.affine), str(p))
+                        mag_paths_per_echo.append(str(p))
 
             out_dir = work_dir / "iqsmplus_output"
             out_dir.mkdir(exist_ok=True)
 
-            print("============================")
-            print("RECONSTRUCTION")
-            print("============================")
-            qsm_path = run_iqsm_plus(
-                phase_nii_path=phase_input_path,
-                te_values=te_list_s,
-                mag_nii_path=mag_path,
-                mask_nii_path=mask_path,
-                voxel_size=voxel_size,
-                b0_dir=b0_dir,
-                b0=float(b0),
-                eroded_rad=int(eroded_rad),
-                phase_sign=phase_sign,
-                output_dir=str(out_dir),
-            )
+            per_echo_qsm_paths = []
+            if len(phase_paths) == 1:
+                print("============================")
+                print("RECONSTRUCTION")
+                print("============================")
+                qsm_path = run_iqsm_plus(
+                    phase_nii_path=str(phase_paths[0]),
+                    te=te_list_s[0],
+                    mask_nii_path=mask_path,
+                    voxel_size=voxel_size,
+                    b0_dir=b0_dir,
+                    b0=float(b0),
+                    eroded_rad=int(eroded_rad),
+                    phase_sign=phase_sign,
+                    output_dir=str(out_dir),
+                )
+            else:
+                print("============================")
+                print(f"MULTI-ECHO RECONSTRUCTION ({len(phase_paths)} echoes)")
+                print("============================")
+                qsm_maps = []
+                affine = None
+                for i, (ppath, te_s) in enumerate(zip(phase_paths, te_list_s)):
+                    print(f"\nEcho {i+1}/{len(phase_paths)}  (TE = {te_list_ms[i]} ms)")
+                    echo_out = work_dir / f"echo{i+1}_output"
+                    q_path = run_iqsm_plus(
+                        phase_nii_path=str(ppath),
+                        te=te_s,
+                        mask_nii_path=mask_path,
+                        voxel_size=voxel_size,
+                        b0_dir=b0_dir,
+                        b0=float(b0),
+                        eroded_rad=int(eroded_rad),
+                        phase_sign=phase_sign,
+                        output_dir=str(echo_out),
+                    )
+                    q_img = nib.load(q_path)
+                    if affine is None:
+                        affine = q_img.affine
+                    qsm_maps.append(q_img.get_fdata(dtype=np.float32))
 
-            # Orientation-preview inputs (last-echo phase, last-echo magnitude, mask).
-            # phase_input_path may be 3D (single-echo) or 4D — we record echo idx
-            # accordingly so the viewer can extract the right echo on render.
-            try:
-                ph_shape = nib.load(phase_input_path).shape
-                last_phase_echo = (int(ph_shape[-1]) - 1
-                                   if len(ph_shape) == 4 else None)
-            except Exception:
-                last_phase_echo = None
-            last_phase_path = phase_input_path
+                    # Save per-echo iQSM+ in the main output dir with clear names
+                    new_q = out_dir / f"iQSM_plus_e{i+1}.nii.gz"
+                    shutil.copy(q_path, new_q)
+                    per_echo_qsm_paths.append(str(new_q))
+
+                print(f"\nAveraging {len(qsm_maps)} echoes …")
+                qsm_stack = np.stack(qsm_maps, axis=-1)
+                te_bc = np.array(te_list_s, dtype=np.float32).reshape(1, 1, 1, -1)
+                if mag_path:
+                    print("  Using magnitude × TE² weighted averaging")
+                    if mag_paths_per_echo:
+                        mag_data = np.stack(
+                            [nib.load(mp).get_fdata(dtype=np.float32) for mp in mag_paths_per_echo],
+                            axis=-1,
+                        )
+                    else:
+                        mag_3d = nib.load(mag_path).get_fdata(dtype=np.float32)
+                        if mag_3d.ndim == 3:
+                            mag_data = np.repeat(mag_3d[..., np.newaxis], len(qsm_maps), axis=-1)
+                        else:
+                            mag_data = mag_3d
+                    weights = (mag_data * te_bc) ** 2
+                    denom = weights.sum(axis=-1, keepdims=True)
+                    denom[denom == 0] = 1.0
+                    qsm_avg = (weights * qsm_stack).sum(axis=-1) / denom.squeeze(-1)
+                else:
+                    print("  No magnitude provided — using TE² weighted averaging (uniform magnitude)")
+                    weights = te_bc ** 2
+                    qsm_avg = (qsm_stack * weights).sum(axis=-1) / weights.sum()
+                qsm_path = str(out_dir / "iQSM_plus.nii.gz")
+                nib.save(nib.Nifti1Image(qsm_avg.astype(np.float32), affine), qsm_path)
+
+            # Orientation-preview inputs (last-echo phase, last-echo magnitude, mask)
+            last_phase_path = str(phase_paths[-1])
+            last_phase_echo = None  # phase_paths is per-echo 3D after staging
 
             last_mag_path, last_mag_echo = None, None
-            if mag_path:
+            if mag_paths_per_echo:
+                last_mag_path = mag_paths_per_echo[-1]
+                last_mag_echo = None
+            elif mag_path:
                 try:
-                    mg_shape = nib.load(mag_path).shape
+                    mag_shape = nib.load(mag_path).shape
                     last_mag_path = mag_path
-                    last_mag_echo = (int(mg_shape[-1]) - 1
-                                     if len(mg_shape) == 4 else None)
+                    last_mag_echo = (int(mag_shape[-1]) - 1
+                                     if len(mag_shape) == 4 else None)
                 except Exception:
                     last_mag_path = mag_path
                     last_mag_echo = None
@@ -379,6 +442,18 @@ def _run_thread(job, work_dir, mode, phase_paths, te_list_ms, mag_path, mask_pat
             job["mask_image"] = _make_slice_image(
                 mask_path, vmin=0, vmax=1,
             ) if mask_path else None
+
+            # Per-echo info — used by the "Echo Selection" recombine panel.
+            # te lists are populated for both single- and multi-echo so the
+            # panel renders for single-echo too (in a disabled state).
+            job["per_echo_qsm_paths"] = per_echo_qsm_paths or None
+            job["per_echo_te_s"]      = list(te_list_s)
+            job["per_echo_te_ms"]     = list(te_list_ms)
+            job["mag_paths_per_echo"] = list(mag_paths_per_echo) if mag_paths_per_echo else None
+            job["mag_3d_path"]        = (mag_path if (mag_path and not mag_paths_per_echo)
+                                         else None)
+            job["render_vmin"]        = float(vmin)
+            job["render_vmax"]        = float(vmax)
     except CheckpointNotFoundError as exc:
         print(f"\n❌ {exc}")
         job["status"] = "error"
@@ -394,8 +469,36 @@ def _run_thread(job, work_dir, mode, phase_paths, te_list_ms, mag_path, mask_pat
 
 
 def _result_files(job):
-    files = [p for p in (job.get("qsm_path"),) if p]
+    """Order: recombined first (when present), then the all-echoes combined
+    iQSM_plus.nii.gz, then per-echo iQSM_plus_e<i>.nii.gz files."""
+    out_dir = job.get("out_dir")
+    files = []
+    # Recombined output (if Echo Selection has been used) — qsm_path is
+    # updated to point at it, distinguished by filename pattern.
+    qsm = job.get("qsm_path")
+    if qsm and "iQSM_plus_recombined_" in Path(qsm).name:
+        files.append(qsm)
+    # Original all-echoes combination
+    if out_dir:
+        all_echoes = Path(out_dir) / "iQSM_plus.nii.gz"
+        if all_echoes.exists() and str(all_echoes) not in files:
+            files.append(str(all_echoes))
+    elif qsm and qsm not in files:
+        files.append(qsm)
+    # Per-echo files
+    for p in (job.get("per_echo_qsm_paths") or []):
+        if p and p not in files:
+            files.append(p)
     return files or None
+
+
+def _echo_choices(job):
+    """Build (label, value) pairs for the echo-selection CheckboxGroup, including
+    single-echo runs (so the panel can render disabled instead of hidden)."""
+    tes_ms = job.get("per_echo_te_ms") or []
+    if not tes_ms:
+        return []
+    return [(f"Echo {i+1} — TE = {te_ms:g} ms", i) for i, te_ms in enumerate(tes_ms)]
 
 
 def _build_results_zip(job):
@@ -422,12 +525,20 @@ def _result_info_md(job):
 
 def _state_dict(job):
     return {
-        "qsm_path":         job.get("qsm_path"),
-        "last_phase_path":  job.get("last_phase_path"),
-        "last_phase_echo":  job.get("last_phase_echo"),
-        "last_mag_path":    job.get("last_mag_path"),
-        "last_mag_echo":    job.get("last_mag_echo"),
-        "mask_path":        job.get("mask_path"),
+        "qsm_path":             job.get("qsm_path"),
+        "last_phase_path":      job.get("last_phase_path"),
+        "last_phase_echo":      job.get("last_phase_echo"),
+        "last_mag_path":        job.get("last_mag_path"),
+        "last_mag_echo":        job.get("last_mag_echo"),
+        "mask_path":            job.get("mask_path"),
+        "per_echo_qsm_paths":   job.get("per_echo_qsm_paths"),
+        "per_echo_te_s":        job.get("per_echo_te_s"),
+        "per_echo_te_ms":       job.get("per_echo_te_ms"),
+        "mag_paths_per_echo":   job.get("mag_paths_per_echo"),
+        "mag_3d_path":          job.get("mag_3d_path"),
+        "out_dir":              job.get("out_dir"),
+        "render_vmin":          job.get("render_vmin"),
+        "render_vmax":          job.get("render_vmax"),
     }
 
 
@@ -446,6 +557,9 @@ def _state_and_slider_update(job):
 def _visibility_updates(job):
     has_results = bool(_result_files(job))
     zip_path = _build_results_zip(job) if has_results else None
+    choices = _echo_choices(job)
+    has_run = bool(choices)                # any run done (single or multi)
+    is_multi = len(choices) >= 2           # only multi-echo can recombine
     return (
         gr.update(visible=True),                             # log_group
         gr.update(visible=has_results),                      # results_group
@@ -457,6 +571,12 @@ def _visibility_updates(job):
                                or job.get("mask_image"))),  # orientation_row
         (gr.update(value=zip_path, visible=True)
          if zip_path else gr.update(visible=False)),        # download_all_btn
+        gr.update(visible=has_run),                          # echo_select_group
+        (gr.update(choices=choices,
+                   value=[c[1] for c in choices],
+                   interactive=is_multi)
+         if has_run else gr.update()),                       # echo_checkboxes
+        gr.update(interactive=is_multi),                     # recombine_btn
     )
 
 
@@ -501,6 +621,9 @@ def run_pipeline(phase_files, te_ms_str, mag_files, mask_file,
         gr.update(visible=False),                        # mask_panel
         gr.update(visible=False),                        # orientation_row
         gr.update(visible=False),                        # download_all_btn
+        gr.update(visible=False),                        # echo_select_group
+        gr.update(),                                     # echo_checkboxes
+        gr.update(),                                     # recombine_btn
     )
     try:
         te_list_ms = _parse_te_input(te_ms_str)
@@ -514,7 +637,7 @@ def run_pipeline(phase_files, te_ms_str, mag_files, mask_file,
     if not phase_files:
         yield ("❌ Provide phase file(s) — use the Phase upload in the NIfTI / MAT tab.", *_noop)
         return
-    # Magnitude is optional — iQSM+ falls back to mag = 1 inside the model.
+    # Magnitude is optional — multi-echo falls back to TE²-only weighting when omitted.
 
     files = _sort_paths([str(_to_path(f)) for f in
                         (phase_files if isinstance(phase_files, list) else [phase_files])])
@@ -1039,10 +1162,34 @@ with gr.Blocks(title="iQSM+", analytics_enabled=False) as app:
             log_out = gr.Textbox(show_label=False, lines=8, max_lines=20,
                                  interactive=False, autoscroll=True)
 
-        # ── 8. Results (hidden until run) ───────────────────────────
+        # ── 8. Echo Selection — recombine multi-echo iQSM+ ──────────
+        with gr.Accordion("Echo Selection (refine combination)", open=True, visible=False,
+                          elem_classes=["dr-section", "dr-accordion"]) as echo_select_group:
+            gr.Markdown(
+                "Multi-echo iQSM+ combines all echoes via magnitude × TE² weighted averaging "
+                "(or TE² weighting only when no magnitude is supplied). Early echoes with "
+                "short TEs may produce artifacts — uncheck any echoes you want to "
+                "**exclude**, then click **Recombine**. The per-echo files above are "
+                "reused, so this is fast (no re-inference)."
+            )
+            echo_checkboxes = gr.CheckboxGroup(
+                choices=[], value=[],
+                label="Include in combination",
+            )
+            recombine_btn = gr.Button(
+                "🔁  Recombine selected echoes",
+                variant="primary",
+                elem_id="dr-recombine-btn",
+            )
+            recombine_status = gr.Markdown("")
+
+        # ── 9. Results (hidden until run) ───────────────────────────
         with gr.Accordion("Results", open=True, visible=False,
                           elem_classes=["dr-section", "dr-accordion"]) as results_group:
             gr.Markdown(
+                "Recombined output (`iQSM_plus_recombined_e<…>.nii.gz`) appears first when "
+                "Echo Selection has been used; the original all-echoes combination "
+                "(`iQSM_plus.nii.gz`) and per-echo files (`iQSM_plus_e1.nii.gz`, …) follow. "
                 "Click a file size on the right to download a single file, or use "
                 "**Download all (ZIP)** below for the whole bundle."
             )
@@ -1371,7 +1518,98 @@ with gr.Blocks(title="iQSM+", analytics_enabled=False) as app:
                  output_state, slice_slider,
                  log_group, results_group, viz_group,
                  img_phase, img_mag, img_mask, orientation_row,
-                 download_all_btn],
+                 download_all_btn,
+                 echo_select_group, echo_checkboxes, recombine_btn],
+    )
+
+    # ── Recombine multi-echo iQSM+ from per-echo files (no re-inference) ──
+    def recombine_echoes(selected, state, slice_idx, vmin, vmax):
+        if not state or not state.get("per_echo_qsm_paths"):
+            return ("⚠️ No multi-echo run available to recombine.",
+                    gr.update(), gr.update(), gr.update(), gr.update(), gr.update())
+        if not selected:
+            return ("⚠️ Select at least one echo to recombine.",
+                    gr.update(), gr.update(), gr.update(), gr.update(), gr.update())
+
+        idx = sorted(int(i) for i in selected)
+        per_qsm = state["per_echo_qsm_paths"]
+        te_s    = state["per_echo_te_s"]
+        te_ms   = state["per_echo_te_ms"]
+        out_dir = Path(state["out_dir"])
+
+        qsm_vols = [_volume_array(per_qsm[i]) for i in idx]
+        affine = nib.load(per_qsm[idx[0]]).affine
+
+        mag_per_echo = state.get("mag_paths_per_echo")
+        mag_3d_path  = state.get("mag_3d_path")
+        sel_mags = None
+        if mag_per_echo and len(mag_per_echo) >= len(per_qsm):
+            sel_mags = [_volume_array(mag_per_echo[i]) for i in idx]
+        elif mag_3d_path:
+            mag_3d = _volume_array(mag_3d_path)
+            sel_mags = [mag_3d for _ in idx]
+
+        sel_te_s = np.array([te_s[i] for i in idx], dtype=np.float32)
+        te_bc = sel_te_s.reshape(1, 1, 1, -1)
+        if sel_mags:
+            mag_data = np.stack(sel_mags, axis=-1)
+            weights = (mag_data * te_bc) ** 2
+            denom = weights.sum(axis=-1, keepdims=True)
+            denom[denom == 0] = 1.0
+            qsm_avg = (weights * np.stack(qsm_vols, axis=-1)).sum(axis=-1) / denom.squeeze(-1)
+            method = "magnitude × TE² weighted"
+        else:
+            weights = te_bc ** 2
+            qsm_avg = (np.stack(qsm_vols, axis=-1) * weights).sum(axis=-1) / weights.sum()
+            method = "TE² weighted (uniform magnitude)"
+
+        sel_tag = "_".join(f"e{i+1}" for i in idx)
+        for old in out_dir.glob("iQSM_plus_recombined_*.nii.gz"):
+            try: old.unlink()
+            except OSError: pass
+        qsm_out = out_dir / f"iQSM_plus_recombined_{sel_tag}.nii.gz"
+        nib.save(nib.Nifti1Image(qsm_avg.astype(np.float32), affine), str(qsm_out))
+        _volume_array.cache_clear()
+
+        new_state = dict(state)
+        new_state["qsm_path"] = str(qsm_out)
+        qsm_img = _make_slice_image(str(qsm_out), slice_idx, vmin, vmax)
+
+        included = ", ".join(f"Echo {i+1} (TE={te_ms[i]:g} ms)" for i in idx)
+        excluded = [i for i in range(len(per_qsm)) if i not in idx]
+        excluded_str = (", ".join(f"Echo {i+1}" for i in excluded)
+                        if excluded else "(none)")
+        status = (f"✅ Recombined {len(idx)}/{len(per_qsm)} echoes via {method}.\n\n"
+                  f"**Included:** {included}\n\n"
+                  f"**Excluded:** {excluded_str}\n\n"
+                  f"Saved as `{Path(qsm_out).name}`")
+
+        # Refresh Results panel listing — recombined first, then all-echoes,
+        # then per-echo files.
+        files = [str(qsm_out)]
+        all_echoes_qsm = out_dir / "iQSM_plus.nii.gz"
+        if all_echoes_qsm.exists():
+            files.append(str(all_echoes_qsm))
+        for p in per_qsm:
+            if p:
+                files.append(p)
+
+        zip_path = out_dir / "iqsmplus_results.zip"
+        try: zip_path.unlink()
+        except FileNotFoundError: pass
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            for p in files:
+                zf.write(p, arcname=Path(p).name)
+
+        return (status, files, qsm_img, new_state,
+                shape_summary(files), gr.update(value=str(zip_path), visible=True))
+
+    recombine_btn.click(
+        recombine_echoes,
+        inputs=[echo_checkboxes, output_state, slice_slider,
+                vmin_input, vmax_input],
+        outputs=[recombine_status, result_file, img_qsm,
+                 output_state, result_info, download_all_btn],
     )
 
     # Slice navigation — re-renders QSM at user window plus phase / mag / mask

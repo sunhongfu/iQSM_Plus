@@ -201,12 +201,12 @@ python dicom_to_nifti.py --dicom_dir /path/to/dicoms --chopper off  # never appl
 You'll see a copy-paste-friendly summary you can paste into the iQSM+ web app form:
 
 ```text
-─── Acquisition values ───
+─── Acquisition values (paste these into the web app) ───
   Echo Times (ms)  : 3.2, 6.5, 9.8, 13.1, 16.4, 19.7, 23.1, 26.4
   Voxel size (mm)  : 1 1 1
   B0 (Tesla)       : 3.0
-  B0 direction     : 0.0  0.0  1.0
-──────────────────────────
+  B0 direction     : 0 0 1
+─────────────────────────────────────────────────────────
 ```
 
 The output folder will contain:
@@ -218,10 +218,14 @@ converted/
 └── params.json
 ```
 
+`params.json` carries both machine-readable values (`te_ms`, `voxel_size_mm`, `b0_T`, `b0_dir`) and **copy-paste strings** formatted exactly the way the web app's input fields expect — `te_ms_string`, `voxel_size_string`, `b0_dir_string`. Open the JSON, copy the relevant string, paste into the form. Or skip the form altogether and use the CLI's `--from_converted` flag (auto-fills everything from the same JSON).
+
 `python dicom_to_nifti.py --help` lists all flags. The output folder feeds directly into:
 
-- the **web app** (drop the NIfTIs into the upload buttons; copy values from `params.json` into the form), or
+- the **web app** (drop the NIfTIs into the upload buttons; paste the copy-paste strings from `params.json` into the form), or
 - the **CLI** (`run.py --from_converted ./converted` reads `params.json` automatically — no retyping).
+
+> The **same `dicom_to_nifti.py` ships byte-identically with iQSM, iQSM+, and DeepRelaxo** — the script is independent of the downstream pipeline. Pick whichever copy is closest at hand; the output is generic enough for any of them (or any other QSM / R2* tool).
 
 ---
 
@@ -244,7 +248,7 @@ Two side-by-side upload buttons:
 
 Each accepts one 4D file or multiple 3D files (one per echo). Supported: `.nii`, `.nii.gz`, `.mat` (v5 or v7.3).
 
-**Phase is required.** **Magnitude is optional** — used internally by iQSM+ for magnitude × TE² weighted multi-echo fitting; without it iQSM+ falls back to uniform magnitude (TE²-only weighting).
+**Phase is required.** **Magnitude is optional** — used for magnitude × TE² weighted averaging on multi-echo input; without it, multi-echo falls back to TE²-only weighting (uniform magnitude). The combiner runs externally (in `run.py` / `app.py`), so per-echo iQSM+ outputs are kept on disk and the web app's Echo Selection panel can recombine subsets without re-running inference.
 
 Have raw DICOMs? See [DICOM → NIfTI conversion](#dicom--nifti-conversion).
 
