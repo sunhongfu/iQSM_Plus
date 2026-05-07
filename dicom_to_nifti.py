@@ -48,6 +48,14 @@ strength, and B0 direction (in image coordinates).
 input-field formats used by typical QSM / mapping web tools, so users can
 paste them straight in.
 
+`--out_dir` is overwritten in place on each run (a single consolidated
+`params.json` is written, not per-NIfTI sidecars — phase and magnitude
+share their metadata anyway). Use a fresh `--out_dir` per subject /
+acquisition. To convert phase and magnitude that live in separate DICOM
+folders, pass both folders to one `--dicom_dir` invocation rather than
+running twice — the second run's `params.json` would overwrite the
+first's.
+
 Run `python dicom_to_nifti.py --help` for usage examples.
 """
 
@@ -652,7 +660,13 @@ def main():
     parser.add_argument(
         "--out_dir", default="./dicom_converted", metavar="DIR",
         help="Where to write the converted NIfTI files and params.json "
-             "(default: %(default)s).",
+             "(default: %(default)s). Existing files in this folder are "
+             "overwritten without prompting; use a fresh --out_dir per "
+             "subject / acquisition to avoid losing earlier conversions. "
+             "If both phase and magnitude DICOMs live in separate folders, "
+             "convert them together in one run with `--dicom_dir A B` "
+             "rather than two runs into the same --out_dir (the second "
+             "run's params.json would overwrite the first's).",
     )
     parser.add_argument(
         "--chopper", choices=["auto", "on", "off"], default="auto",
@@ -722,6 +736,19 @@ def main():
 
     out_dir = Path(args.out_dir).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Make overwrite behaviour visible — easy to miss otherwise.
+    overwrite_targets = []
+    if (out_dir / "params.json").exists():
+        overwrite_targets.append("params.json")
+    overwrite_targets.extend(
+        sorted(p.name for p in out_dir.glob("dcm_converted_*.nii*"))
+    )
+    if overwrite_targets:
+        print(f"⚠️  Overwriting existing files in {out_dir}:")
+        for name in overwrite_targets:
+            print(f"     • {name}")
+        print(f"   (use --out_dir <fresh_dir> to keep the previous conversion.)")
 
     try:
         result = _convert(file_paths, out_dir, chopper=args.chopper,
