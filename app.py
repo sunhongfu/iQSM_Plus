@@ -2,7 +2,7 @@
 iQSM+ — Gradio web app for orientation-adaptive Quantitative Susceptibility Mapping.
 
 Panels: Phase + Magnitude Input (NIfTI / MAT — single-echo or multi-echo) ·
-Files Processing (auto-expands only on multi-file uploads) · Echo Times ·
+Files Processing (folded by default; auto-expands on upload) · Echo Times ·
 Brain Mask · Acquisition + Hyper-parameters (B0, B0 direction, voxel size,
 mask erosion) · Run · Log · Echo Selection · Visualisation · Results.
 """
@@ -1380,10 +1380,8 @@ with gr.Blocks(title="iQSM+", analytics_enabled=False) as app:
             v = _voxel_from_first_nii(new_paths)
             if v:
                 voxel_update = gr.update(value=v)
-        # Auto-expand only when multiple 3D files were uploaded — single-file
-        # (3D or 4D) uploads leave the panel as the user left it.
-        order_open = gr.update(open=True) if len(srt) >= 2 else gr.update()
-        return (updated, srt or None, summary, None, order_open,
+        # Auto-expand on any upload (the panel is folded by default).
+        return (updated, srt or None, summary, None, gr.update(open=True),
                 status, _clear_btn_update(len(srt)), voxel_update)
 
     phase_input.click(
@@ -1468,9 +1466,8 @@ with gr.Blocks(title="iQSM+", analytics_enabled=False) as app:
         else:
             status = (f"✅ Added {len(added_names)} magnitude files:\n\n"
                       + "\n".join(f"- `{n}`" for n in added_names))
-        # Auto-expand only when multiple 3D files were uploaded.
-        order_open = gr.update(open=True) if len(srt) >= 2 else gr.update()
-        return (updated, srt or None, shape_summary(srt), None, order_open,
+        # Auto-expand on any upload (the panel is folded by default).
+        return (updated, srt or None, shape_summary(srt), None, gr.update(open=True),
                 status, _clear_btn_update(len(srt)))
 
     mag_button.click(
