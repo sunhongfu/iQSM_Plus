@@ -2,7 +2,7 @@
 iQSM+ — Gradio web app for orientation-adaptive Quantitative Susceptibility Mapping.
 
 Panels: Phase + Magnitude Input (NIfTI / MAT — single-echo or multi-echo) ·
-Echo Order (auto-expands only on multi-file uploads) · Echo Times ·
+Files Processing (auto-expands only on multi-file uploads) · Echo Times ·
 Brain Mask · Acquisition + Hyper-parameters (B0, B0 direction, voxel size,
 mask erosion) · Run · Log · Echo Selection · Visualisation · Results.
 """
@@ -1091,8 +1091,8 @@ with gr.Blocks(title="iQSM+", analytics_enabled=False) as app:
                     )
                     mag_status = gr.Markdown("")
 
-        # ── 2. Echo Order ────────────────────────────────────────────
-        with gr.Accordion("Echo Order", open=False,
+        # ── 2. Files Processing ──────────────────────────────────────
+        with gr.Accordion("Files Processing", open=False,
                           elem_classes=["dr-section", "dr-accordion"]) as order_group:
             gr.Markdown(
                 "Set the echo order when uploaded multiple 3D files (one per echo) "
@@ -1388,7 +1388,7 @@ with gr.Blocks(title="iQSM+", analytics_enabled=False) as app:
 
     phase_input.click(
         lambda: _RED_WAIT.format(
-            msg="⏳ Waiting for phase file selection / upload — Echo Order will populate "
+            msg="⏳ Waiting for phase file selection / upload — Files Processing will populate "
                 "after the file transfer completes…"
         ),
         outputs=phase_status,
@@ -1475,7 +1475,7 @@ with gr.Blocks(title="iQSM+", analytics_enabled=False) as app:
 
     mag_button.click(
         lambda: _RED_WAIT.format(
-            msg="⏳ Waiting for magnitude file selection / upload — Echo Order will "
+            msg="⏳ Waiting for magnitude file selection / upload — Files Processing will "
                 "populate after the file transfer completes…"
         ),
         outputs=mag_status,
