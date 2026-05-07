@@ -1181,24 +1181,6 @@ with gr.Blocks(title="iQSM+", analytics_enabled=False) as app:
             )
             recombine_status = gr.Markdown("")
 
-        # ── 9. Results (hidden until run) ───────────────────────────
-        with gr.Accordion("Results", open=True, visible=False,
-                          elem_classes=["dr-section", "dr-accordion"]) as results_group:
-            gr.Markdown(
-                "Recombined output (`iQSM_plus_recombined_e<…>.nii.gz`) appears first when "
-                "Echo Selection has been used; the original all-echoes combination "
-                "(`iQSM_plus.nii.gz`) and per-echo files (`iQSM_plus_e1.nii.gz`, …) follow. "
-                "Click a file size on the right to download a single file, or use "
-                "**Download all (ZIP)** below for the whole bundle."
-            )
-            result_file = gr.File(show_label=False, file_count="multiple")
-            result_info = gr.Markdown("")
-            download_all_btn = gr.DownloadButton(
-                "📦  Download all (ZIP)",
-                visible=False,
-                elem_id="dr-download-all-btn",
-            )
-
         # ── 9. Visualisation (hidden until run) ─────────────────────
         with gr.Accordion("Visualisation", open=True, visible=False,
                           elem_classes=["dr-section", "dr-accordion"]) as viz_group:
@@ -1241,6 +1223,25 @@ with gr.Blocks(title="iQSM+", analytics_enabled=False) as app:
                     show_fullscreen_button=False,
                     height=300, visible=False,
                 )
+
+        # ── 10. Results (hidden until run) ──────────────────────────
+        with gr.Accordion("Results", open=True, visible=False,
+                          elem_classes=["dr-section", "dr-accordion"]) as results_group:
+            gr.Markdown(
+                "Recombined output (`iQSM_plus_recombined_e<…>.nii.gz`) appears first when "
+                "Echo Selection has been used; the original all-echoes combination "
+                "(`iQSM_plus.nii.gz`) and per-echo files (`iQSM_plus_e1.nii.gz`, …) follow. "
+                "Click a file size on the right to download a single file, or use "
+                "**Download all (ZIP)** below for the whole bundle."
+            )
+            result_file = gr.File(show_label=False, file_count="multiple")
+            result_info = gr.Markdown("")
+            download_all_btn = gr.DownloadButton(
+                "📦  Download all (ZIP)",
+                visible=False,
+                elem_id="dr-download-all-btn",
+            )
+
         output_state = gr.State({})
 
     # ── Handlers ─────────────────────────────────────────────────────────
