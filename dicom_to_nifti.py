@@ -22,16 +22,26 @@ for whatever subset of the four modalities a scanner exports:
                            Real + imaginary, when complete, is preferred
                            over explicit phase / magnitude DICOMs.
 
-DICOMs are walked recursively from one or more folders. With `--dicom_dir`
-they're auto-split by modality (DICOM `ImageType`, `ComplexImageComponent`,
-GE private tag `(0043, 102f)`); with the explicit modality flags
-(`--phase_dir`, `--mag_dir`, `--real_dir`, `--imag_dir`) the auto-classifier
-is bypassed and files go straight into the named bucket — useful when your
-DICOMs aren't tagged correctly (untagged DICOMs would otherwise default to
-magnitude). Slices are then grouped by `EchoTime` and sorted by
-`ImagePositionPatient`. The output is a NIfTI volume per modality (3D for
-single-echo, 4D for multi-echo) plus a `params.json` containing TE(s),
-voxel size, B0 strength, and B0 direction (in image coordinates).
+Two input modes, picking the right one depends on whether your DICOM
+modality tags are reliable:
+
+  • `--dicom_dir` — the normal path. Accepts one or more folders, walks
+    them recursively, and auto-classifies each file by DICOM `ImageType`,
+    `ComplexImageComponent`, or the GE private tag `(0043, 102f)`. Use
+    this when your DICOMs are tagged correctly. Phase + magnitude in
+    separate folders? Just pass both: `--dicom_dir phase/ mag/`.
+
+  • `--phase_dir` / `--mag_dir` / `--real_dir` / `--imag_dir` — the
+    rescue path for when tags are wrong, missing, or ambiguous (e.g.
+    `ImageType = ORIGINAL/PRIMARY/OTHER` with no `ComplexImageComponent`).
+    Files in each folder go straight into the named bucket — the
+    auto-classifier is bypassed. Use these when `--dicom_dir` puts your
+    DICOMs in the wrong bucket.
+
+Slices are grouped by `EchoTime` and sorted by `ImagePositionPatient`.
+The output is a NIfTI volume per modality (3D for single-echo, 4D for
+multi-echo) plus a `params.json` containing TE(s), voxel size, B0
+strength, and B0 direction (in image coordinates).
 
 `params.json` also contains *copy-paste strings* (`te_ms_string`,
 `voxel_size_string`, `b0_dir_string`) formatted to match the conventional
@@ -52,25 +62,23 @@ import numpy as np
 
 _EXAMPLES = """\
 examples:
-  # Auto-classify a single folder of DICOMs (any subset of phase /
-  # magnitude / real / imaginary is accepted). When real + imaginary form
-  # a complete pair, they're preferred over explicit phase / magnitude
-  # (phase = angle(R+jI), magnitude = |R+jI|):
+  # Normal use — auto-classify one folder of DICOMs:
   python dicom_to_nifti.py --dicom_dir /path/to/dicoms
 
-  # Phase and magnitude exported as two separate folders. Each folder's
-  # files go straight into the corresponding bucket — no auto-classifier:
+  # Phase and magnitude in separate folders (still auto-classified —
+  # --dicom_dir takes any number of folders):
+  python dicom_to_nifti.py --dicom_dir /path/to/phase /path/to/magnitude
+
+  # Rescue mode — DICOMs aren't tagged correctly so the auto-classifier
+  # gets it wrong. Bypass it by telling the script what's in each folder:
   python dicom_to_nifti.py --phase_dir /path/to/phase \\
                            --mag_dir   /path/to/magnitude
+  python dicom_to_nifti.py --phase_dir /path/to/phase    # phase only
+  python dicom_to_nifti.py --mag_dir   /path/to/magnitude    # magnitude only
 
-  # Phase only — useful when DICOMs aren't tagged as phase and would
-  # otherwise be misclassified as magnitude:
-  python dicom_to_nifti.py --phase_dir /path/to/phase
-
-  # Magnitude only:
-  python dicom_to_nifti.py --mag_dir /path/to/magnitude
-
-  # Real and imaginary exported as two separate folders:
+  # Real and imaginary exported as two separate folders. Phase and
+  # magnitude are then derived from the complex signal (phase =
+  # angle(R+jI), magnitude = |R+jI|):
   python dicom_to_nifti.py --real_dir /path/to/real \\
                            --imag_dir /path/to/imaginary
 
@@ -606,36 +614,40 @@ def main():
     )
 
     parser.add_argument(
-        "--dicom_dir", metavar="DIR",
-        help="A single folder of DICOMs whose modalities are auto-split by "
+        "--dicom_dir", nargs="+", metavar="DIR",
+        help="One or more folders of DICOMs (the normal path). Each folder "
+             "is walked recursively and modalities are auto-split by "
              "ImageType / ComplexImageComponent / GE private tag. Any "
              "subset of the four modalities is accepted — phase only, "
-             "magnitude only, phase + magnitude, real + imaginary, all "
-             "four mixed, etc. Untagged DICOMs default to magnitude.",
+             "magnitude only, phase + magnitude in separate folders, real "
+             "+ imaginary in separate folders, all mixed together, etc. "
+             "Untagged DICOMs default to magnitude. Use this whenever your "
+             "DICOM tags are reliable.",
     )
     parser.add_argument(
         "--phase_dir", metavar="DIR",
-        help="Folder of phase DICOMs. Files here are placed straight into "
-             "the phase bucket — the auto-classifier is bypassed, so this "
-             "is the right flag if your phase DICOMs aren't tagged "
-             "correctly. Can be used alone or paired with --mag_dir.",
+        help="Rescue mode for mis-tagged DICOMs. Files here are placed "
+             "straight into the phase bucket without consulting any DICOM "
+             "tag. Use only when --dicom_dir mis-classifies your phase "
+             "DICOMs (e.g. they're tagged as 'OTHER' or untagged). Can be "
+             "used alone or combined with the other rescue flags.",
     )
     parser.add_argument(
         "--mag_dir", metavar="DIR",
-        help="Folder of magnitude DICOMs. Files here are placed straight "
-             "into the magnitude bucket (auto-classifier bypassed). Can be "
-             "used alone or paired with --phase_dir.",
+        help="Rescue mode for mis-tagged DICOMs — force-place all files "
+             "here into the magnitude bucket. Use only when --dicom_dir "
+             "mis-classifies your magnitude DICOMs.",
     )
     parser.add_argument(
         "--real_dir", metavar="DIR",
-        help="Folder of real-part DICOMs (placed straight into the real "
-             "bucket). Must be supplied together with --imag_dir; phase + "
-             "magnitude are derived from the complex signal.",
+        help="Rescue mode — force-place files into the real bucket. Must "
+             "be supplied together with --imag_dir; phase + magnitude are "
+             "derived from the complex signal.",
     )
     parser.add_argument(
         "--imag_dir", metavar="DIR",
-        help="Folder of imaginary-part DICOMs (placed straight into the "
-             "imaginary bucket). Must be supplied together with --real_dir.",
+        help="Rescue mode — force-place files into the imaginary bucket. "
+             "Must be supplied together with --real_dir.",
     )
     parser.add_argument(
         "--out_dir", default="./dicom_converted", metavar="DIR",
@@ -652,56 +664,59 @@ def main():
     )
     args = parser.parse_args()
 
-    has_combined = args.dicom_dir is not None
-    has_pm = args.phase_dir is not None or args.mag_dir is not None
-    has_ri = args.real_dir is not None or args.imag_dir is not None
+    has_auto = bool(args.dicom_dir)
+    has_rescue = (
+        args.phase_dir is not None or args.mag_dir is not None
+        or args.real_dir is not None or args.imag_dir is not None
+    )
 
-    modes_used = sum(int(b) for b in (has_combined, has_pm, has_ri))
-    if modes_used == 0:
+    if not has_auto and not has_rescue:
         parser.error(
-            "No input folder. Provide --dicom_dir, "
-            "or --phase_dir and/or --mag_dir, or --real_dir + --imag_dir."
+            "No input folder. Pass --dicom_dir DIR [DIR ...] for the normal "
+            "auto-classified path, or one of --phase_dir / --mag_dir / "
+            "--real_dir + --imag_dir for the rescue path."
         )
-    if modes_used > 1:
+    if has_auto and has_rescue:
         parser.error(
-            "Pick one input mode only: --dicom_dir (single combined folder) "
-            "OR --phase_dir / --mag_dir (either or both) OR --real_dir + "
-            "--imag_dir. Don't combine modes."
+            "Don't mix --dicom_dir with the rescue flags (--phase_dir, "
+            "--mag_dir, --real_dir, --imag_dir). Use --dicom_dir when DICOM "
+            "tags are reliable; use the rescue flags when they aren't."
         )
-    # phase / magnitude are independently usable — either one alone is a
-    # valid run. Real + imaginary, in contrast, must always be paired since
-    # the complex signal can't be formed from one alone.
-    if has_ri and (args.real_dir is None or args.imag_dir is None):
+    # Real + imaginary must always be paired — the complex signal can't be
+    # formed from one alone. (Phase / magnitude can each stand alone.)
+    has_ri_partial = (args.real_dir is not None) ^ (args.imag_dir is not None)
+    if has_ri_partial:
         parser.error("--real_dir and --imag_dir must be supplied together.")
 
-    # Walk each requested folder. Modality flags also build a `forced`
-    # mapping so the converter trusts the caller for those files instead
-    # of running the auto-classifier on them.
+    # Walk each requested folder. Rescue flags additionally build a
+    # `forced` mapping so the converter trusts the caller for those files
+    # instead of running the auto-classifier.
     file_paths = []
     forced = {}
-    if has_combined:
-        file_paths.extend(_walk_files(args.dicom_dir, parser))
-    elif has_pm:
+    if has_auto:
+        for d in args.dicom_dir:
+            file_paths.extend(_walk_files(d, parser))
+    else:
         if args.phase_dir is not None:
-            phase_files = _walk_files(args.phase_dir, parser)
-            file_paths.extend(phase_files)
-            for p in phase_files:
+            files = _walk_files(args.phase_dir, parser)
+            file_paths.extend(files)
+            for p in files:
                 forced[p] = "P"
         if args.mag_dir is not None:
-            mag_files = _walk_files(args.mag_dir, parser)
-            file_paths.extend(mag_files)
-            for p in mag_files:
+            files = _walk_files(args.mag_dir, parser)
+            file_paths.extend(files)
+            for p in files:
                 forced[p] = "M"
-    elif has_ri:
-        real_files_in = _walk_files(args.real_dir, parser)
-        imag_files_in = _walk_files(args.imag_dir, parser)
-        file_paths.extend(real_files_in)
-        file_paths.extend(imag_files_in)
-        for p in real_files_in:
-            forced[p] = "R"
-        for p in imag_files_in:
-            forced[p] = "I"
-        file_paths.extend(_walk_files(args.imag_dir, parser))
+        if args.real_dir is not None:
+            files = _walk_files(args.real_dir, parser)
+            file_paths.extend(files)
+            for p in files:
+                forced[p] = "R"
+        if args.imag_dir is not None:
+            files = _walk_files(args.imag_dir, parser)
+            file_paths.extend(files)
+            for p in files:
+                forced[p] = "I"
 
     print(f"\nParsing {len(file_paths)} DICOM file(s)…")
 
