@@ -1040,9 +1040,14 @@ with gr.Blocks(title="iQSM+", analytics_enabled=False) as app:
         with gr.Accordion("Processing Order", open=False,
                           elem_classes=["dr-section", "dr-accordion"]) as order_group:
             gr.Markdown(
-                "Phase and magnitude files in processing order — sorted naturally "
-                "by filename (`mag1`, `mag2`, …, `mag10`). When both modalities are "
-                "supplied, the two columns must have matching echo counts."
+                "**Only relevant when you uploaded multiple 3D files (one per echo) "
+                "for a multi-echo dataset** — this panel sets the order in which "
+                "those echoes are processed. Files are sorted naturally by filename "
+                "(`mag1`, `mag2`, …, `mag10`); rename them if the auto-sort gets it "
+                "wrong. **Skip this panel if you uploaded a single 4D volume** "
+                "(echo order is already baked into the file's last dimension) or a "
+                "single-echo 3D file. When both modalities are supplied as 3D-per-"
+                "echo files, the two columns must have matching echo counts."
             )
             with gr.Row(equal_height=True):
                 with gr.Column():
