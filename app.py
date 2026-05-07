@@ -1134,8 +1134,7 @@ with gr.Blocks(title="iQSM+", analytics_enabled=False) as app:
                 placeholder="e.g.  0.1 0.0 0.995    or    0.1, 0.0, 0.995",
                 info="Three numbers, comma- or space-separated. "
                      "iQSM+ adapts to non-axial acquisitions via this vector. "
-                     "Auto-filled from DICOM headers; leave blank for axial scans "
-                     "(defaults to 0 0 1).",
+                     "Leave blank for axial scans (defaults to 0 0 1).",
             )
             with gr.Row():
                 eroded_rad = gr.Slider(
