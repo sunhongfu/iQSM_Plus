@@ -44,9 +44,9 @@ multi-echo) plus a `params.json` containing TE(s), voxel size, B0
 strength, and B0 direction (in image coordinates).
 
 `params.json` also contains *copy-paste strings* (`te_ms_string`,
-`voxel_size_string`, `b0_dir_string`) formatted to match the conventional
-input-field formats used by typical QSM / mapping web tools, so users can
-paste them straight in.
+`voxel_size_string`, `b0_direction_string`) formatted to match the
+conventional input-field formats used by typical QSM / mapping web
+tools, so users can paste them straight in.
 
 `--out_dir` is overwritten in place on each run (a single consolidated
 `params.json` is written, not per-NIfTI sidecars — phase and magnitude
@@ -332,7 +332,7 @@ def _convert(file_paths, output_dir, chopper="auto", forced_modality=None):
         Files not in this dict are still auto-classified.
 
     Returns a dict with phase_path, mag_path, te_values_s, voxel_size, b0,
-    b0_dir, and phase_shape. Raises ValueError on missing phase / real-imag
+    b0_direction, and phase_shape. Raises ValueError on missing phase / real-imag
     pair, mixed studies, mismatched echo slice counts, or empty input.
     """
     try:
@@ -578,7 +578,7 @@ def _convert(file_paths, output_dir, chopper="auto", forced_modality=None):
         except Exception:
             b0 = None
 
-    b0_dir = None
+    b0_direction = None
     iop = getattr(ds0, "ImageOrientationPatient", None)
     if iop is not None:
         try:
@@ -586,16 +586,16 @@ def _convert(file_paths, output_dir, chopper="auto", forced_modality=None):
             col = np.array([float(v) for v in iop[3:6]])
             slice_n = np.cross(row, col)
             b0_lps = np.array([0., 0., 1.])
-            b0_dir_arr = np.array([
+            b0_direction_arr = np.array([
                 float(np.dot(row, b0_lps)),
                 float(np.dot(col, b0_lps)),
                 float(np.dot(slice_n, b0_lps)),
             ])
-            n = np.linalg.norm(b0_dir_arr)
+            n = np.linalg.norm(b0_direction_arr)
             if n > 0:
-                b0_dir = (b0_dir_arr / n).tolist()
+                b0_direction = (b0_direction_arr / n).tolist()
         except Exception:
-            b0_dir = None
+            b0_direction = None
 
     return {
         "phase_path": phase_path,
@@ -603,7 +603,7 @@ def _convert(file_paths, output_dir, chopper="auto", forced_modality=None):
         "te_values_s": te_values_s,
         "voxel_size": voxel_size,
         "b0": b0,
-        "b0_dir": b0_dir,
+        "b0_direction": b0_direction,
         "phase_shape": tuple(phase_array.shape) if phase_array is not None else None,
         "mag_shape":   tuple(mag_array.shape)   if mag_array   is not None else None,
     }
@@ -761,19 +761,19 @@ def main():
     te_s       = result["te_values_s"]
     voxel      = result["voxel_size"]
     b0         = result["b0"]
-    b0_dir     = result["b0_dir"]
+    b0_direction     = result["b0_direction"]
 
     te_ms          = [float(t) * 1000 for t in te_s]
     te_ms_string   = ", ".join(f"{t:g}" for t in te_ms)
     voxel_string   = " ".join(f"{v:.4g}" for v in voxel) if voxel else ""
-    b0_dir_string  = " ".join(f"{v:.4g}" for v in b0_dir) if b0_dir else ""
+    b0_direction_string  = " ".join(f"{v:.4g}" for v in b0_direction) if b0_direction else ""
 
     params = {
         # Machine-readable
         "te_ms":             te_ms,
         "voxel_size_mm":     list(voxel) if voxel else None,
         "b0_T":              float(b0) if b0 is not None else None,
-        "b0_dir":            list(b0_dir) if b0_dir else None,
+        "b0_direction":            list(b0_direction) if b0_direction else None,
         "n_echoes":          len(te_s),
         "phase_nifti":       Path(phase_path).name if phase_path else None,
         "magnitude_nifti":   Path(mag_path).name if mag_path else None,
@@ -781,7 +781,7 @@ def main():
         # input fields expect them, so users can paste straight in.
         "te_ms_string":      te_ms_string,
         "voxel_size_string": voxel_string,
-        "b0_dir_string":     b0_dir_string,
+        "b0_direction_string":     b0_direction_string,
     }
     (out_dir / "params.json").write_text(json.dumps(params, indent=2))
 
@@ -807,8 +807,8 @@ def main():
     print(f"  Voxel size (mm)  : {voxel_string}")
     if b0 is not None:
         print(f"  B0 (Tesla)       : {b0}")
-    if b0_dir:
-        print(f"  B0 direction     : {b0_dir_string}")
+    if b0_direction:
+        print(f"  B0 direction     : {b0_direction_string}")
     print("─────────────────────────────────────────────────────────")
 
 

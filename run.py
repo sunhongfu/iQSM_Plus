@@ -366,8 +366,8 @@ def main():
         if args.b0 == 3.0 and params.get("b0_T") is not None:
             args.b0 = float(params["b0_T"])
             print(f"B0 from params.json: {args.b0} T")
-        if b0_dir_value is None and params.get("b0_dir"):
-            b0_dir_value = list(params["b0_dir"])
+        if b0_dir_value is None and params.get("b0_direction"):
+            b0_dir_value = list(params["b0_direction"])
             print(f"B0 direction from params.json: {b0_dir_value}")
         if args.te_ms is not None:
             if len(args.te_ms) != len(te_values_s):
