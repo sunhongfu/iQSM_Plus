@@ -7,6 +7,8 @@ so the tool runs without any MATLAB dependency.
 
 import os
 import tempfile
+import logging
+import time
 
 import numpy as np
 import nibabel as nib
@@ -188,6 +190,93 @@ def _interpolate_volume(vol: np.ndarray, vox: np.ndarray) -> np.ndarray:
 
 
 # ---------------------------------------------------------------------------
+# Diagnostics: device selection and memory usage.
+#
+# Logged via the `logging` module (not print()) specifically because a
+# `print()` to a non-TTY stdout (i.e. whenever this runs inside a Docker
+# container, as it always does in the OpenRecon deployment) is block-buffered
+# by default -- messages can sit in the buffer and never reach the captured
+# container log if the process is killed before the buffer flushes. A
+# `logging.StreamHandler` calls `flush()` after every single record, so
+# switching progress messages over to `logging` means each one is guaranteed
+# to reach the log immediately, even if the process is hard-killed a moment
+# later (e.g. by the kernel OOM killer, which gives no chance to run any
+# cleanup/finally code).
+# ---------------------------------------------------------------------------
+
+def _log_device_info(device: torch.device) -> None:
+    logging.info("iQSM+ inference device: %s", device)
+    if device.type == "cuda":
+        try:
+            idx = device.index if device.index is not None else 0
+            props = torch.cuda.get_device_properties(idx)
+            logging.info("  GPU %d: %s, %.1f GB total memory, capability %d.%d",
+                         idx, props.name, props.total_memory / (1024 ** 3), props.major, props.minor)
+        except Exception:
+            logging.warning("Could not query CUDA device properties", exc_info=True)
+    else:
+        logging.warning("torch.cuda.is_available() is False -- running iQSM+ on CPU. This is "
+                         "far slower and uses substantially more host RAM for a volume this "
+                         "size than the equivalent GPU run.")
+
+
+def _cgroup_memory_usage_bytes():
+    """(usage, limit) in bytes as enforced by Docker's cgroup, or (None, None)
+    if unreadable (e.g. not running inside a Linux container)."""
+    try:  # cgroup v2
+        with open("/sys/fs/cgroup/memory.current") as f:
+            usage = int(f.read().strip())
+        with open("/sys/fs/cgroup/memory.max") as f:
+            raw = f.read().strip()
+            limit = None if raw == "max" else int(raw)
+        return usage, limit
+    except OSError:
+        pass
+    try:  # cgroup v1
+        with open("/sys/fs/cgroup/memory/memory.usage_in_bytes") as f:
+            usage = int(f.read().strip())
+        with open("/sys/fs/cgroup/memory/memory.limit_in_bytes") as f:
+            limit = int(f.read().strip())
+        return usage, limit
+    except OSError:
+        return None, None
+
+
+def _log_mem(tag: str) -> None:
+    """Log host RSS, cgroup usage/limit, and GPU memory. Cheap -- call
+    liberally around every stage so a future OOM kill leaves a trail of
+    breadcrumbs showing how memory was trending, instead of the log just
+    going silent with no explanation (as happened on 2026-07-03)."""
+    try:
+        with open("/proc/self/status") as f:
+            status = f.read()
+        vmrss_kb = next((int(line.split()[1]) for line in status.splitlines()
+                         if line.startswith("VmRSS:")), None)
+    except OSError:
+        vmrss_kb = None
+    rss_str = "%.1f MB" % (vmrss_kb / 1024.0) if vmrss_kb is not None else "unknown"
+
+    usage, limit = _cgroup_memory_usage_bytes()
+    if usage is not None and limit:
+        cgroup_str = "%.1f/%.1f MB (%.0f%%)" % (usage / (1024 ** 2), limit / (1024 ** 2), 100.0 * usage / limit)
+    elif usage is not None:
+        cgroup_str = "%.1f MB (no limit found)" % (usage / (1024 ** 2))
+    else:
+        cgroup_str = "unknown"
+
+    gpu_str = "n/a"
+    if torch.cuda.is_available():
+        gpu_str = "allocated=%.1f MB reserved=%.1f MB" % (
+            torch.cuda.memory_allocated() / (1024 ** 2), torch.cuda.memory_reserved() / (1024 ** 2))
+
+    logging.info("[mem] %-32s host RSS=%s | cgroup=%s | GPU %s", tag, rss_str, cgroup_str, gpu_str)
+
+
+def _array_mb(arr: np.ndarray) -> float:
+    return arr.nbytes / (1024 ** 2)
+
+
+# ---------------------------------------------------------------------------
 # Main reconstruction function
 # ---------------------------------------------------------------------------
 
@@ -245,7 +334,12 @@ def run_iqsm_plus(
     """
 
     def _log(frac, msg):
-        print(f"[{frac:.0%}] {msg}")
+        # logging (not just print): a StreamHandler flushes after every record,
+        # so this message is guaranteed to reach the captured container log
+        # immediately -- print() alone can sit in stdout's block-buffer and be
+        # lost if the process is killed (e.g. OOM) before the buffer flushes.
+        logging.info("[%3.0f%%] %s", frac * 100, msg)
+        print(f"[{frac:.0%}] {msg}", flush=True)
         if progress_fn is not None:
             progress_fn(frac, msg)
 
@@ -253,8 +347,11 @@ def run_iqsm_plus(
         output_dir = tempfile.mkdtemp(prefix="iqsm_plus_")
     os.makedirs(output_dir, exist_ok=True)
 
+    t_start = time.perf_counter()
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     _log(0.0, f"Using device: {device}")
+    _log_device_info(device)
+    _log_mem("run_iqsm_plus start")
 
     # ------------------------------------------------------------------
     # 1. Load phase data
@@ -270,6 +367,8 @@ def run_iqsm_plus(
     else:
         zooms = phase_img.header.get_zooms()
         vox = np.array(zooms[:3], dtype=np.float64)
+    logging.info("voxel_size (mm) = %s (source: %s)", vox.tolist(),
+                 "caller override" if voxel_size is not None else "NIfTI header")
 
     # B0 direction default
     if b0_dir is None:
@@ -309,6 +408,10 @@ def run_iqsm_plus(
         mask = np.ones(imsize_orig, dtype=np.float32)
         eroded_rad = 0  # no erosion when using whole-head mask
 
+    logging.info("Loaded phase %s (%.1f MB), mag %s (%.1f MB), mask %s (%.1f MB)",
+                 phase.shape, _array_mb(phase), mag.shape, _array_mb(mag), mask.shape, _array_mb(mask))
+    _log_mem("after loading inputs")
+
     # ------------------------------------------------------------------
     # 3. Preprocessing (mirrors iQSM_plus.m steps)
     # ------------------------------------------------------------------
@@ -319,12 +422,39 @@ def run_iqsm_plus(
     # 3b. Isotropic interpolation
     interp_flag = not np.allclose(vox, vox.min())
     if interp_flag:
+        zoom_factors = (vox / vox.min()).tolist()
+        projected_voxels = phase.size * float(np.prod(zoom_factors))
+        projected_mb = projected_voxels * 4 / (1024 ** 2)  # float32
+        # A near-isotropic protocol should have zoom factors close to 1x on every
+        # axis. Factors this large almost always mean voxel_size was computed
+        # wrong upstream (e.g. wrong matrixSize field, or a partition/slice count
+        # mismatch) rather than a genuinely anisotropic acquisition -- and zoom()
+        # will happily try to allocate an output array many GB (or TB) in size for
+        # it, which is exactly the kind of silent, un-loggable memory blowup that
+        # gets a process OOM-killed with no other trace in the log. Surface it
+        # loudly *before* attempting the allocation, not after.
+        if max(zoom_factors) > 8.0 or projected_mb > 2048:
+            logging.warning(
+                "Isotropic interpolation zoom factors are extreme: vox=%s -> factors=%s. "
+                "Projected output size for phase alone: ~%.0f MB (%.2f GB). This usually "
+                "indicates voxel_size_mm was computed incorrectly upstream (e.g. wrong "
+                "matrixSize/partition-count field), not a real anisotropic acquisition. "
+                "Proceeding anyway, but this is the most likely cause of an OOM if the "
+                "process dies during this step.",
+                vox.tolist(), ["%.2f" % f for f in zoom_factors], projected_mb, projected_mb / 1024.0)
         _log(0.15, "Interpolating to isotropic resolution …")
+        logging.info("Interpolation: vox=%s -> factors=%s, phase %s -> projected ~%s (%.1f MB)",
+                     vox.tolist(), ["%.2f" % f for f in zoom_factors], phase.shape,
+                     tuple(int(round(s * f)) for s, f in zip(phase.shape, zoom_factors + [1.0])), projected_mb)
+        t0 = time.perf_counter()
         phase = _interpolate_phase_to_isotropic(phase, vox)
         mag = _interpolate_volume(mag, vox)
         mask = _interpolate_volume(mask, vox)
         vox_iso = np.full(3, vox.min())
         imsize_iso = np.array(phase.shape[:3], dtype=int)
+        logging.info("Interpolation done in %.1f s -> phase %s (%.1f MB)",
+                     time.perf_counter() - t0, phase.shape, _array_mb(phase))
+        _log_mem("after isotropic interpolation")
     else:
         vox_iso = vox.copy()
         imsize_iso = imsize_orig.copy()
@@ -349,16 +479,21 @@ def run_iqsm_plus(
     phase_crop = phase[bbox + (slice(None),)]   # (H_c, W_c, D_c, N)
     mask_crop  = mask[bbox]                     # (H_c, W_c, D_c)
     _log(0.22, f"Cropped volume: {phase.shape[:3]} → {phase_crop.shape[:3]}")
+    _log_mem("after crop")
 
     # 3f. Zero-pad cropped volume to multiples of 16
     phase_pad, positions = _zero_pad(phase_crop, 16)
     mask_pad, _          = _zero_pad(mask_crop,  16)
+    logging.info("Padded volume: phase_pad %s (%.1f MB)", phase_pad.shape, _array_mb(phase_pad))
 
     # ------------------------------------------------------------------
     # 4. Deep learning inference
     # ------------------------------------------------------------------
     _log(0.25, "Loading iQSM+ model …")
+    t0 = time.perf_counter()
     model = get_model(device)
+    logging.info("Model loaded in %.1f s", time.perf_counter() - t0)
+    _log_mem("after model load")
 
     _log(0.30, "Running reconstruction …")
 
@@ -382,14 +517,18 @@ def run_iqsm_plus(
                 0.30 + 0.50 * (i / n_echoes),
                 f"Reconstructing echo {i + 1}/{n_echoes} …",
             )
+            t0 = time.perf_counter()
             tmp_img = phase_t[i].unsqueeze(0)   # (1, 1, H, W, D)
             tmp_te = te_t[i]
             pred_chi[i] = model(tmp_img, mask_t, tmp_te, b0_t, z_prjs_t)
+            logging.info("Echo %d/%d forward pass done in %.1f s", i + 1, n_echoes, time.perf_counter() - t0)
+            _log_mem("after echo %d/%d" % (i + 1, n_echoes))
 
     pred_chi = pred_chi * mask_t                            # apply mask
     pred_chi = pred_chi.squeeze(1)                         # (N, H, W, D)
     pred_chi = pred_chi.permute(1, 2, 3, 0)               # (H, W, D, N)
     pred_chi = pred_chi.cpu().numpy().astype(np.float32)
+    _log_mem("after inference loop")
 
     # ------------------------------------------------------------------
     # 5. Post-processing
@@ -421,7 +560,13 @@ def run_iqsm_plus(
     # 5d. Undo isotropic interpolation (back to original resolution)
     if interp_flag:
         factors = (imsize_orig / imsize_iso).tolist()
+        logging.info("Undoing isotropic interpolation: %s -> factors=%s -> projected %s",
+                     chi_fitted.shape, ["%.3f" % f for f in factors],
+                     tuple(int(round(s * f)) for s, f in zip(chi_fitted.shape, factors)))
+        t0 = time.perf_counter()
         chi_fitted = zoom(chi_fitted, factors, order=1)
+        logging.info("Undo-interpolation done in %.1f s -> %s", time.perf_counter() - t0, chi_fitted.shape)
+        _log_mem("after undo-interpolation")
 
     # ------------------------------------------------------------------
     # 6. Save output NIfTI
@@ -433,5 +578,6 @@ def run_iqsm_plus(
     out_img.header.set_zooms(tuple(vox_iso if not interp_flag else vox))
     nib.save(out_img, out_path)
 
-    _log(1.0, f"Done! Saved to {out_path}")
+    _log_mem("run_iqsm_plus end")
+    _log(1.0, f"Done! Saved to {out_path} (total {time.perf_counter() - t_start:.1f} s)")
     return out_path

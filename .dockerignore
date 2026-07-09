@@ -1,0 +1,7 @@
+.git
+legacy
+demo
+figs
+__pycache__
+*.pyc
+.DS_Store
