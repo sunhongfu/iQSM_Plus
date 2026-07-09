@@ -409,8 +409,8 @@ def run_iqsm_plus(
         mask = np.ones(imsize_orig, dtype=np.float32)
         eroded_rad = 0  # no erosion when using whole-head mask
 
-    logging.info("Loaded phase %s (%.1f MB), mag %s (%.1f MB), mask %s (%.1f MB)",
-                 phase.shape, _array_mb(phase), mag.shape, _array_mb(mag), mask.shape, _array_mb(mask))
+    logging.info("Loaded phase %s (%.1f MB), mask %s (%.1f MB)",
+                 phase.shape, _array_mb(phase), mask.shape, _array_mb(mask))
     _log_mem("after loading inputs")
 
     # ------------------------------------------------------------------
