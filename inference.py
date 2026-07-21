@@ -413,6 +413,17 @@ def run_iqsm_plus(
                  phase.shape, _array_mb(phase), mask.shape, _array_mb(mask))
     _log_mem("after loading inputs")
 
+    # Mask the phase *before* any other preprocessing, matching the original MATLAB
+    # reference (legacy/matlab/fcns/Save_Input_iQSMplus.m: `phase = phase .* mask;`,
+    # done before mask erosion and before this becomes the network's saved input) --
+    # this step was dropped somewhere during the MATLAB->Python port. Without it, the
+    # convolution inside LoTLayer (models/unet_blocks.py's LG()) runs on raw, unmasked
+    # background/wrapped phase noise instead of the zeroed-out input the model was
+    # trained on, producing wildly wrong output specifically where masked vs. unmasked
+    # phase differs most -- outside/at the edge of the brain. Applied with the
+    # *unmodified* mask (before erosion below), matching the MATLAB order exactly.
+    phase = phase * mask
+
     # ------------------------------------------------------------------
     # 3. Preprocessing (mirrors iQSM_plus.m steps)
     # ------------------------------------------------------------------
@@ -421,7 +432,15 @@ def run_iqsm_plus(
     phase = float(phase_sign) * phase
 
     # 3b. Isotropic interpolation
-    interp_flag = not np.allclose(vox, vox.min())
+    # interp_flag matches MATLAB's criterion exactly (iQSM_plus.m: imsize2 =
+    # round(imsize.*vox/min(vox)); interp_flag = ~isequal(imsize, imsize2)) -- whether the
+    # *rounded target array size* actually differs from the original, not whether the
+    # voxel sizes are numerically close (the previous np.allclose(vox, vox.min()) check,
+    # which is stricter and could trigger interpolation -- and its zoom()-rounding
+    # overhead -- for voxel-size differences too small to change the resulting array size
+    # at all).
+    isotropic_target_shape = np.round(np.array(phase.shape[:3]) * vox / vox.min()).astype(int)
+    interp_flag = not np.array_equal(isotropic_target_shape, phase.shape[:3])
     if interp_flag:
         zoom_factors = (vox / vox.min()).tolist()
         projected_voxels = phase.size * float(np.prod(zoom_factors))
@@ -470,8 +489,12 @@ def run_iqsm_plus(
     permute_flag = abs(b0_dir[1]) > abs(b0_dir[2])
     if permute_flag:
         b0_dir[[1, 2]] = b0_dir[[2, 1]]
+        # phase and mask must get the *same* permutation -- they're different data
+        # channels of the same volume, so applying a different transpose to each
+        # (previously (0, 2, 1) for phase but (1, 0, 2) for mask) misaligned them,
+        # or would outright crash with a shape mismatch on non-cubic volumes.
         phase = np.transpose(phase, (0, 2, 1))
-        mask  = np.transpose(mask,  (1, 0, 2))
+        mask  = np.transpose(mask,  (0, 2, 1))
 
     # 3e. Crop to brain bounding box (+ 16-voxel context padding)
     bbox = _brain_bbox(mask, pad=16)
@@ -528,12 +551,32 @@ def run_iqsm_plus(
 
     # 5c. Undo isotropic interpolation (back to original resolution)
     if interp_flag:
-        factors = (imsize_orig / imsize_iso).tolist()
+        # Reciprocal of the *original* forward zoom factor (vox.min() / vox, mirroring
+        # step 3b's vox / vox.min()) -- not a ratio of array shapes (imsize_orig /
+        # imsize_iso, the previous approach). zoom() rounds its forward output size to a
+        # whole number of voxels, so imsize_iso isn't exactly imsize_orig * forward_factor;
+        # computing the reverse factor from that already-rounded shape compounds the
+        # rounding error into where resampled values actually land -- most visible as
+        # misalignment at the array edges. The true reciprocal keeps the reverse zoom
+        # mathematically aligned with the forward one.
+        factors = (vox.min() / vox).tolist()
         logging.info("Undoing isotropic interpolation: %s -> factors=%s -> projected %s",
                      chi_fitted.shape, ["%.3f" % f for f in factors],
                      tuple(int(round(s * f)) for s, f in zip(chi_fitted.shape, factors)))
         t0 = time.perf_counter()
         chi_fitted = zoom(chi_fitted, factors, order=1)
+        # Even with the accurate factor above, zoom()'s own output-size rounding can still
+        # land 1 voxel off imsize_orig per axis -- downstream code (and the DICOM slices
+        # built from this) require exactly the original shape, so pad/crop to force an
+        # exact match rather than let a mismatch propagate.
+        target = tuple(int(s) for s in imsize_orig)
+        if chi_fitted.shape != target:
+            logging.info("Undo-interpolation landed at %s, adjusting to exact target %s",
+                         chi_fitted.shape, target)
+            fixed = np.zeros(target, dtype=chi_fitted.dtype)
+            src_slices = tuple(slice(0, min(a, b)) for a, b in zip(chi_fitted.shape, target))
+            fixed[src_slices] = chi_fitted[src_slices]
+            chi_fitted = fixed
         logging.info("Undo-interpolation done in %.1f s -> %s", time.perf_counter() - t0, chi_fitted.shape)
         _log_mem("after undo-interpolation")
 
