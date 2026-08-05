@@ -6,7 +6,7 @@
 
 iQSM+ extends iQSM to handle **arbitrary acquisition orientations** — not just axial scans. It uses orientation-adaptive latent feature editing (OA-LFE) blocks that learn the encoding of acquisition-orientation vectors and integrate them into the network. iQSM+ accepts single-echo and multi-echo phase + (optional) magnitude inputs.
 
-**Jump to:** [Highlights](#highlights) · [Layout](#layout) · [Overview](#overview) · [Quick Start](#quick-start) · [DICOM → NIfTI conversion](#dicom--nifti-conversion) · [Web App](#web-app) · [Command-Line Interface](#command-line-interface) · [Run Demo Examples](#run-demo-examples) · [Troubleshooting](#troubleshooting) · [Citation](#citation)
+**Jump to:** [Highlights](#highlights) · [Layout](#layout) · [Overview](#overview) · [Quick Start](#quick-start) · [Docker](#docker) · [DICOM → NIfTI conversion](#dicom--nifti-conversion) · [Web App](#web-app) · [Command-Line Interface](#command-line-interface) · [Run Demo Examples](#run-demo-examples) · [Troubleshooting](#troubleshooting) · [Citation](#citation)
 
 ## Highlights
 
@@ -31,6 +31,7 @@ iQSM+ extends iQSM to handle **arbitrary acquisition orientations** — not just
 | `config.yaml` | Example YAML config for `run.py --config`. |
 | `bet2_utils.py` | Automatic brain-mask generation via `vendor/bet2/` -- used by `run.py` / `app.py` when no mask is supplied. |
 | `vendor/bet2/` | FSL's `bet2` binary + its runtime shared libraries, vendored directly (not a full FSL install). Same copy as `iQSM` and `DeepRelaxo`. |
+| `Dockerfile` | Self-contained image (Python env, checkpoints, bet2 all baked in) -- see [Docker](#docker). |
 
 ---
 
@@ -147,7 +148,32 @@ iQSM_Plus/
 
 ### 4. Run
 
-If you're starting from raw DICOMs, do the [DICOM → NIfTI conversion step](#dicom--nifti-conversion) first. Then choose the [Web App](#web-app) (recommended) or the [Command-Line Interface](#command-line-interface).
+If you're starting from raw DICOMs, do the [DICOM → NIfTI conversion step](#dicom--nifti-conversion) first. Then choose the [Web App](#web-app) (recommended) or the [Command-Line Interface](#command-line-interface) -- natively, or via [Docker](#docker) if you'd rather not set up a Python environment (also the only way to get automatic bet2 brain extraction on Windows or macOS -- see [Troubleshooting](#troubleshooting)).
+
+---
+
+## Docker
+
+Builds a self-contained image (Python env, checkpoints, and bet2 all baked in) that runs the same way on Windows, macOS, or Linux -- Docker Desktop runs a real Linux VM on all three, which is what lets `vendor/bet2/`'s Linux/x86_64 binary actually execute regardless of host OS (see [Troubleshooting](#troubleshooting)).
+
+```bash
+# Build (from this repo's root; needs network access -- checkpoints are downloaded
+# during the build). --platform linux/amd64 is required explicitly on Apple Silicon
+# hosts (see the Dockerfile's header comment for why).
+docker build --platform linux/amd64 -t iqsmplus .
+
+# Run the web app (default) -- open http://localhost:7860 in your browser
+docker run --rm -p 7860:7860 iqsmplus
+
+# With GPU acceleration (needs the NVIDIA Container Toolkit on the host)
+docker run --rm --gpus all -p 7860:7860 iqsmplus
+
+# Run the CLI instead, e.g. against a folder of NIfTIs already on the host
+docker run --rm -v /path/to/data:/data iqsmplus \
+    python3 run.py --from_converted /data/converted --output /data/output
+```
+
+CPU-only hosts work too (just slower) -- drop `--gpus all` entirely, no other changes needed. See the [Dockerfile](Dockerfile) itself for the full annotated build.
 
 ---
 
@@ -458,7 +484,7 @@ All three options produce the same output: `iQSM_plus.nii.gz` (susceptibility, p
 - **Iron-rich deep grey matter appears dark in the QSM output** — flip the phase sign convention with `--reverse-phase-sign 1` (CLI) or the *Reverse phase sign* checkbox (web app).
 - **Non-axial acquisition produces unrealistic susceptibility values** — make sure B0 direction is set. Use `--from_converted` (auto), or pass `--b0-dir x y z` (CLI), or fill the *B0 direction* field (web app).
 - **Checkpoint download fails behind a firewall** — manually grab the two `.pth` files from [Hugging Face](https://huggingface.co/sunhongfu/iQSM_Plus/tree/main) and drop them in `checkpoints/`.
-- **"bet2 not found" warning, no automatic brain mask** — bet2 is a Linux/x86_64 binary (`vendor/bet2/bin/bet2`); it won't run natively on macOS or arm64. It works fine under Docker/Linux amd64, or set `BET2_DIR` to point at your own FSL install. Either way, reconstruction still completes without a mask (whole-head) rather than failing.
+- **"bet2 not found" warning, no automatic brain mask** — bet2 is a Linux/x86_64 binary (`vendor/bet2/bin/bet2`); it won't run natively on Windows or macOS. Reconstruction still completes without a mask (whole-head) rather than failing, but for automatic masking on those platforms, use [Docker](#docker) instead of a native install (Docker Desktop runs a real Linux VM on both Windows and macOS, which is what lets the vendored binary execute), or set `BET2_DIR` to point at your own FSL/WSL install.
 
 ---
 
