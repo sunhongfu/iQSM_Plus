@@ -29,6 +29,8 @@ iQSM+ extends iQSM to handle **arbitrary acquisition orientations** — not just
 | `data_utils.py` | NIfTI / MAT loaders and shape utilities. |
 | `models/` | OA-LFE LoT-Unet architecture. |
 | `config.yaml` | Example YAML config for `run.py --config`. |
+| `bet2_utils.py` | Automatic brain-mask generation via `vendor/bet2/` -- used by `run.py` / `app.py` when no mask is supplied. |
+| `vendor/bet2/` | FSL's `bet2` binary + its runtime shared libraries, vendored directly (not a full FSL install). Same copy as `iQSM` and `DeepRelaxo`. |
 
 ---
 
@@ -274,11 +276,11 @@ Voxel size is auto-filled from the first NIfTI's header on upload (overridable b
 
 #### 4. Brain Mask *(optional but recommended)*
 
-This section is **open by default**. A brain mask improves **iQSM+ reconstruction quality** by concentrating the network on tissue voxels.
+This section is **open by default**. A brain mask improves **iQSM+ reconstruction quality** by concentrating the network on tissue voxels. If you don't upload one and magnitude is provided, one is **generated automatically via bet2** ([FSL's Brain Extraction Tool](https://fsl.fmrib.ox.ac.uk/fsl/docs/#/structural/bet), vendored at `vendor/bet2/`) when you click Run — uncheck **"Auto brain-extract via bet2 if no mask is uploaded"** to skip that and reconstruct whole-head instead.
 
-Default mask erosion is 3 voxels; adjust under **Acquisition & Hyper-parameters** below if you'd rather keep more cortical brain region.
+Default mask erosion is 3 voxels (applies to any mask used, uploaded or auto-generated); adjust under **Acquisition & Hyper-parameters** below if you'd rather keep more cortical brain region.
 
-⚠️ **Make sure the mask is oriented and aligned to the phase / magnitude volumes.** After the run finishes you can confirm in the **Visualisation** panel — the brain-mask preview shares the same slice slider as the phase / magnitude previews.
+⚠️ **Make sure an uploaded mask is oriented and aligned to the phase / magnitude volumes.** After the run finishes you can confirm in the **Visualisation** panel — the brain-mask preview shares the same slice slider as the phase / magnitude previews.
 
 #### 5. Acquisition & Hyper-parameters *(collapsed by default)*
 
@@ -287,7 +289,7 @@ Default mask erosion is 3 voxels; adjust under **Acquisition & Hyper-parameters*
 | Voxel size (mm) | Overrides NIfTI header. Auto-filled on upload. |
 | B0 (Tesla) | Defaults to 3.0. |
 | **B0 direction** (unit vector) | Auto-filled from `params.json` when using a converted DICOM folder; for hand-prepared NIfTIs, leave blank for axial scans (defaults to `[0, 0, 1]`). For oblique / sagittal / coronal scans, enter the unit vector — this is what makes iQSM+ orientation-aware. |
-| Mask erosion radius (voxels) | Disabled (and 0) when no mask is provided; defaults to 3 once a mask is supplied. |
+| Mask erosion radius (voxels) | Defaults to 3; applies to any mask used (uploaded or bet2-auto-generated). No effect on whole-head runs (no mask at all). |
 | Reverse phase sign | Enable if iron-rich deep grey matter appears dark (rather than bright) in the QSM output. |
 
 #### 6. Run Reconstruction
@@ -407,7 +409,7 @@ output: ./iqsm_plus_output
 - **Input** (mutually exclusive): `--from_converted`, `--echo_files`, `--echo_4d`, `--phase`.
 - **Echo times**: `--te_ms` (preferred, milliseconds) or `--te` (seconds, legacy).
 - **Required**: a phase-input flag (above).
-- **Optional**: `--mag` (omit → uniform magnitude / TE²-only weighting), `--mask` (or `--bet_mask`), `--voxel-size`, `--b0`, `--b0-dir`, `--eroded-rad`, `--reverse-phase-sign`.
+- **Optional**: `--mag` (omit → uniform magnitude / TE²-only weighting; also needed for automatic bet2 brain extraction, below), `--mask` (or `--bet_mask`) — if omitted and magnitude is provided, a mask is generated automatically via bet2 (`--no_bet2` to reconstruct whole-head instead), `--voxel-size`, `--b0`, `--b0-dir`, `--eroded-rad`, `--reverse-phase-sign`.
 - **Output**: `--output` (default `./iqsm_plus_output`).
 - **Setup**: `--download-checkpoints`, `--download-demo`.
 - `--data_dir` is **optional** (defaults to current working directory) — relative input paths are resolved against it.
@@ -456,6 +458,7 @@ All three options produce the same output: `iQSM_plus.nii.gz` (susceptibility, p
 - **Iron-rich deep grey matter appears dark in the QSM output** — flip the phase sign convention with `--reverse-phase-sign 1` (CLI) or the *Reverse phase sign* checkbox (web app).
 - **Non-axial acquisition produces unrealistic susceptibility values** — make sure B0 direction is set. Use `--from_converted` (auto), or pass `--b0-dir x y z` (CLI), or fill the *B0 direction* field (web app).
 - **Checkpoint download fails behind a firewall** — manually grab the two `.pth` files from [Hugging Face](https://huggingface.co/sunhongfu/iQSM_Plus/tree/main) and drop them in `checkpoints/`.
+- **"bet2 not found" warning, no automatic brain mask** — bet2 is a Linux/x86_64 binary (`vendor/bet2/bin/bet2`); it won't run natively on macOS or arm64. It works fine under Docker/Linux amd64, or set `BET2_DIR` to point at your own FSL install. Either way, reconstruction still completes without a mask (whole-head) rather than failing.
 
 ---
 

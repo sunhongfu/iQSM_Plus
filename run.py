@@ -8,10 +8,13 @@ First-time setup (download checkpoints + demo data):
 Have raw DICOMs? Convert them once with the standalone helper, then point
 this script at the converted folder:
     python dicom_to_nifti.py --dicom_dir /path/to/dicoms --output ./converted
-    python run.py --from_converted ./converted --mask BET_mask.nii
+    python run.py --from_converted ./converted
 
 The `--from_converted` flag auto-loads phase / magnitude / TEs / voxel size /
-B0 / B0 direction from the folder's `params.json`.
+B0 / B0 direction from the folder's `params.json`. If magnitude is available
+and no --mask is given, a brain mask is generated automatically via bet2 (see
+`bet2_utils.py`) -- pass --mask/--bet_mask to use your own, or --no_bet2 to
+reconstruct whole-head instead.
 
 Run from explicit NIfTI / MAT files:
     python run.py --echo_files ph1.nii ph2.nii ph3.nii --te_ms 4 8 12 --mag mag.nii.gz
@@ -233,9 +236,15 @@ def _build_parser():
                              "multi-echo input; without it, multi-echo falls back "
                              "to TE²-only weighting (uniform magnitude).")
     parser.add_argument("--mask", metavar="FILE",
-                        help="Brain mask NIfTI / MAT (optional; ones if omitted).")
+                        help="Brain mask NIfTI / MAT. If omitted and magnitude is "
+                             "provided (--mag), one is generated automatically via "
+                             "bet2 -- see --no_bet2 to disable.")
     parser.add_argument("--bet_mask", metavar="FILE",
                         help="Alias for --mask.")
+    parser.add_argument("--no_bet2", action="store_true",
+                        help="Skip automatic bet2 brain extraction when no --mask is "
+                             "given (reconstruct whole-head instead). Ignored if "
+                             "--mask/--bet_mask is provided.")
 
     parser.add_argument("--output", metavar="DIR", default="./iqsm_plus_output",
                         help="Output directory.")
@@ -444,8 +453,9 @@ def main():
                 te_values_s = [args.te[0]]
 
     # ── Stage magnitude (optional) / mask ──────────────────────────────
-    # Magnitude is unused for single-echo and falls back to TE²-only weighting
-    # for multi-echo when not supplied.
+    # Magnitude drives multi-echo TE²-weighted averaging (falls back to TE²-only
+    # weighting when not supplied) and, below, automatic bet2 brain extraction --
+    # single-echo reconstruction itself doesn't otherwise use it.
     mag_arg = args.mag or mag_path_resolved
     if mag_arg:
         mag_src = _resolve_path(data_dir, mag_arg)
@@ -459,6 +469,22 @@ def main():
         mask_path = _stage_input(mask_src, work_dir, suffix="_mask")
     else:
         mask_path = None
+
+    # ── Automatic brain extraction (bet2), when no mask was explicitly given ──
+    if mask_path is None and mag_path is not None and not args.no_bet2:
+        from bet2_utils import run_bet2, first_3d_volume
+        print("No brain mask supplied -- running bet2 automatic brain extraction "
+              "on magnitude (use --no_bet2 to skip)...")
+        mag_3d_path = first_3d_volume(str(mag_path), str(work_dir))
+        bet2_mask = run_bet2(mag_3d_path, str(work_dir))
+        if bet2_mask:
+            mask_path = Path(bet2_mask)
+        else:
+            print("Continuing without a brain mask (whole-head).")
+    elif mask_path is None and mag_path is None:
+        print("No magnitude provided -- cannot auto-run bet2 (it needs a magnitude "
+              "volume). Continuing without a brain mask (whole-head). Provide --mag "
+              "or --mask to change this.")
 
     # Default voxel size for MAT-only input
     if args.voxel_size is None:
