@@ -5,3 +5,12 @@ figs
 __pycache__
 *.pyc
 .DS_Store
+
+# Re-downloaded inside the image during `docker build` (see Dockerfile) -- a locally
+# downloaded copy would just be dead weight in the build-context upload.
+checkpoints/*.pth
+outputs/
+iqsm_plus_output/
+dicom_converted*/
+*.nii
+*.nii.gz

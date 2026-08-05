@@ -1767,20 +1767,30 @@ def _find_free_port(preferred=7860, max_tries=20, host="127.0.0.1"):
 
 if __name__ == "__main__":
     import os
-    host = "127.0.0.1"
+    # Defaults to 127.0.0.1 for native desktop use (matches Gradio's own env var, so
+    # this doubles as the standard override point). Docker images in this repo set
+    # GRADIO_SERVER_NAME=0.0.0.0 so `-p 7860:7860` can actually reach the server --
+    # 127.0.0.1 inside a container is its own loopback, unreachable from the host.
+    host = os.environ.get("GRADIO_SERVER_NAME", "127.0.0.1")
     port = _find_free_port(7860, host=host)
     if port != 7860:
         print(f"⚠️  Port 7860 is in use — falling back to {port}")
-    url = f"http://{host}:{port}/"
+    is_container = host not in ("127.0.0.1", "localhost")
+    display_host = "localhost" if is_container else host
+    url = f"http://{display_host}:{port}/"
     is_remote = bool(os.environ.get("SSH_CONNECTION") or os.environ.get("SSH_CLIENT")
                      or os.environ.get("SSH_TTY"))
-    if is_remote:
+    if is_remote or is_container:
         print()
         print("=" * 60)
-        print("Running over SSH — auto-open skipped.")
-        print(f"Open this URL in your local browser:\n  {url}")
-        print("If the host isn't reachable from your laptop, forward the port:")
-        print(f"  ssh -L {port}:127.0.0.1:{port} <user>@<host>")
+        if is_remote:
+            print("Running over SSH — auto-open skipped.")
+        else:
+            print(f"Running with GRADIO_SERVER_NAME={host} (e.g. inside Docker) — auto-open skipped.")
+        print(f"Open this URL in your browser:\n  {url}")
+        if is_remote:
+            print("If the host isn't reachable from your laptop, forward the port:")
+            print(f"  ssh -L {port}:127.0.0.1:{port} <user>@<host>")
         print("=" * 60)
         print()
     else:
