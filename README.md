@@ -122,7 +122,9 @@ Checkpoints and demo data are excluded from git and hosted on Hugging Face: [sun
 
 **Checkpoints** (required, one-time):
 ```bash
-python run.py --download-checkpoints
+python run.py --download-checkpoints              # healthy-brain model (the default)
+python run.py --download-checkpoints --model ich  # haemorrhage-capable model
+python run.py --download-checkpoints --model all  # both
 ```
 
 **Demo data** (optional, see [Run Demo Examples](#run-demo-examples)):
@@ -135,7 +137,10 @@ python run.py --download-demo
 ```text
 iQSM_Plus/
 ├── checkpoints/
-│   ├── iQSM_plus.pth
+│   ├── healthy/              # healthy-brain model (default)
+│   │   ├── iQSM_plus.pth
+│   │   └── LoTLayer_chi.pth
+│   ├── iQSM_plus.pth         # haemorrhage-capable model (--model ich)
 │   └── LoTLayer_chi.pth
 └── demo/
     ├── ph_multi_echo.nii.gz
@@ -143,6 +148,19 @@ iQSM_Plus/
     ├── mask_multi_echo.nii.gz
     └── params.json
 ```
+
+### Choosing a model
+
+Two sets of weights share the same network and differ only in their training data:
+
+| `--model` | Trained on | Use for |
+|---|---|---|
+| `healthy` (default) | healthy brains only | most scans; less noise in normal tissue |
+| `ich` | data including intracranial haemorrhage (the weights this repository shipped originally) | haemorrhage, or other large susceptibility sources |
+
+Pass `--model ich` to `run.py` to reconstruct a haemorrhage case; the web app has the same choice
+as a radio button. Scripts that relied on the original weights keep them with `--model ich`, and
+the weights stay in their original place (`checkpoints/` and the root of the Hugging Face repo).
 
 ---
 
@@ -437,7 +455,8 @@ output: ./iqsm_plus_output
 - **Required**: a phase-input flag (above).
 - **Optional**: `--mag` (omit → uniform magnitude / TE²-only weighting; also needed for automatic bet2 brain extraction, below), `--mask` (or `--bet_mask`) — if omitted and magnitude is provided, a mask is generated automatically via bet2 (`--no_bet2` to reconstruct whole-head instead), `--voxel-size`, `--b0`, `--b0-dir`, `--eroded-rad`, `--reverse-phase-sign`.
 - **Output**: `--output` (default `./iqsm_plus_output`).
-- **Setup**: `--download-checkpoints`, `--download-demo`.
+- **Model**: `--model healthy` (default) or `--model ich` (haemorrhage); see [Choosing a model](#choosing-a-model).
+- **Setup**: `--download-checkpoints` (honours `--model`; `--model all` fetches both), `--download-demo`.
 - `--data_dir` is **optional** (defaults to current working directory) — relative input paths are resolved against it.
 
 `python run.py --help` lists everything.

@@ -37,8 +37,9 @@ RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/wh
 RUN pip install --no-cache-dir -r requirements-webapp.txt
 
 # Pretrained checkpoints (https://huggingface.co/sunhongfu/iQSM_Plus), baked in at build
-# time so the image is immediately usable -- no first-run download/wait.
-RUN python run.py --download-checkpoints
+# time so the image is immediately usable -- no first-run download/wait. Both variants:
+# the healthy-brain default and the haemorrhage-capable --model ich.
+RUN python run.py --download-checkpoints --model all
 
 # bet2 arrived via `COPY . .` above (vendor/bet2/, ~118MB -- see vendor/bet2/README.md for
 # provenance/license); bet2_utils.py finds it automatically relative to this file, no
