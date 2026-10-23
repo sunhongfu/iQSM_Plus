@@ -49,6 +49,12 @@ CHECKPOINT_FILES = [
     "iQSM_plus.pth",
     "LoTLayer_chi.pth",
 ]
+# Model variants (see inference.py): the healthy-brain weights are the default
+# and live in healthy/ on Hugging Face and in checkpoints/healthy/ locally; the
+# haemorrhage-capable (ICH) weights stay at the repository root, where they have
+# always been, so existing installations keep working.
+MODEL_CHOICES = ["healthy", "ich"]
+DEFAULT_MODEL = "healthy"
 DEMO_FILES = [
     "demo/ph_multi_echo.nii.gz",
     "demo/mag_multi_echo.nii.gz",
@@ -60,6 +66,15 @@ DEMO_FILES = [
 # ---------------------------------------------------------------------------
 # HuggingFace download helpers
 # ---------------------------------------------------------------------------
+
+def _checkpoint_spec(model):
+    """(remote file list, local subdirectory) for one model variant."""
+    if model not in MODEL_CHOICES:
+        raise ValueError(f"Unknown model {model!r}. Choose one of: {', '.join(MODEL_CHOICES)}.")
+    if model == "ich":                       # historical location: repository root
+        return CHECKPOINT_FILES, "checkpoints"
+    return [f"{model}/{f}" for f in CHECKPOINT_FILES], f"checkpoints/{model}"
+
 
 def _download_files(file_list, local_subdir):
     target_dir = REPO_ROOT / local_subdir
@@ -121,7 +136,8 @@ def _split_4d(path, work_dir):
 # ---------------------------------------------------------------------------
 
 def _run_multi_echo(phase_paths, te_values_s, mag_path, mask_path, voxel_size,
-                    b0, b0_dir, eroded_rad, phase_sign, output_dir):
+                    b0, b0_dir, eroded_rad, phase_sign, output_dir,
+                    model=DEFAULT_MODEL):
     """Run iQSM+ on each echo and combine with magnitude × TE² weighting (or
     TE²-only weighting if no magnitude). Returns the combined QSM path."""
     from inference import run_iqsm_plus
@@ -163,6 +179,7 @@ def _run_multi_echo(phase_paths, te_values_s, mag_path, mask_path, voxel_size,
             eroded_rad=eroded_rad,
             phase_sign=phase_sign,
             output_dir=str(echo_out),
+            model=model,
         )
         q_img = nib.load(q_path)
         if affine is None:
@@ -264,8 +281,18 @@ def _build_parser():
                         help="0 = no (default), 1 = yes. Set to 1 if iron-rich "
                              "deep grey matter appears dark in the QSM output.")
 
+    parser.add_argument("--model", choices=MODEL_CHOICES + ["all"], default=None,
+                        metavar="{healthy,ich}",
+                        help="Which trained weights to use (default: healthy). "
+                             "'healthy' was trained on healthy brains only; use "
+                             "'ich' for intracranial haemorrhage or other large "
+                             "susceptibility sources. 'all' is only valid with "
+                             "--download-checkpoints, to fetch both.")
+
     parser.add_argument("--download-checkpoints", action="store_true",
-                        help="Download model weights from HuggingFace and exit.")
+                        help="Download model weights from HuggingFace and exit. "
+                             "Honours --model (default: healthy; use --model all "
+                             "for both variants).")
     parser.add_argument("--download-demo", action="store_true",
                         help="Download demo NIfTIs from HuggingFace and exit.")
     return parser
@@ -302,7 +329,11 @@ def main():
     args = parser.parse_args()
 
     if args.download_checkpoints:
-        _download_files(CHECKPOINT_FILES, "checkpoints")
+        wanted = MODEL_CHOICES if args.model == "all" else [args.model or DEFAULT_MODEL]
+        for variant in wanted:
+            files, subdir = _checkpoint_spec(variant)
+            print(f"--- {variant} model -> {subdir}/")
+            _download_files(files, subdir)
         return
     if args.download_demo:
         _download_files(DEMO_FILES, "demo")
@@ -504,6 +535,10 @@ def main():
 
     phase_sign = 1 if args.reverse_phase_sign else -1
 
+    if args.model == "all":
+        parser.error("--model all is only valid together with --download-checkpoints.")
+    model = args.model or DEFAULT_MODEL
+
     # ── Print summary ───────────────────────────────────────────────────
     print()
     print("=" * 60)
@@ -527,6 +562,8 @@ def main():
     print(f"B0 direction    : {b0_dir_value if b0_dir_value else '[0 0 1] (default)'}")
     print(f"Mask erosion    : {args.eroded_rad} voxels")
     print(f"Reverse phase   : {'yes' if phase_sign == 1 else 'no'}")
+    print(f"Model           : {model}"
+          f"{' (healthy brains; use --model ich for haemorrhage)' if model == 'healthy' else ' (haemorrhage-capable)'}")
     print(f"Output dir      : {output_dir}")
     print("=" * 60)
     print()
@@ -545,6 +582,7 @@ def main():
                 eroded_rad=args.eroded_rad,
                 phase_sign=phase_sign,
                 output_dir=str(output_dir),
+                model=model,
             )
         else:
             qsm_path = _run_multi_echo(
@@ -558,6 +596,7 @@ def main():
                 eroded_rad=args.eroded_rad,
                 phase_sign=phase_sign,
                 output_dir=output_dir,
+                model=model,
             )
     except CheckpointNotFoundError as exc:
         print(f"\nError: {exc}\n", flush=True)

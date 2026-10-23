@@ -27,7 +27,12 @@ import gradio as gr
 REPO_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from inference import run_iqsm_plus, CheckpointNotFoundError
+from inference import (
+    run_iqsm_plus,
+    CheckpointNotFoundError,
+    DEFAULT_MODEL,
+    MODEL_VARIANTS,
+)
 from data_utils import (
     load_array_with_affine,
     file_shape,
@@ -204,7 +209,8 @@ def _make_slice_image(nii_path, slice_idx=None, vmin=-0.2, vmax=0.2,
 # ---------------------------------------------------------------------------
 
 def _print_run_config(work_dir, mode, phase_paths, te_list_ms, mag_path, mask_path,
-                      voxel_size, b0, b0_dir, eroded_rad, phase_sign, auto_bet2=True):
+                      voxel_size, b0, b0_dir, eroded_rad, phase_sign, auto_bet2=True,
+                      model=DEFAULT_MODEL):
     print("============================")
     print("RUN CONFIGURATION")
     print("============================")
@@ -229,6 +235,8 @@ def _print_run_config(work_dir, mode, phase_paths, te_list_ms, mag_path, mask_pa
     print(f"B0 direction    : {b0_dir if b0_dir else '[0 0 1] (default)'}")
     print(f"Mask erosion    : {eroded_rad} voxels")
     print(f"Reverse phase   : {'yes' if phase_sign == 1 else 'no'}")
+    print(f"Model           : {model}"
+          f"{' (healthy brains)' if model == 'healthy' else ' (haemorrhage-capable)'}")
     print(f"Working dir     : {work_dir}")
     cmd = ["python run.py"]
     cmd.append(f"--data_dir {work_dir}")
@@ -255,6 +263,8 @@ def _print_run_config(work_dir, mode, phase_paths, te_list_ms, mag_path, mask_pa
         cmd.append(f"--eroded-rad {eroded_rad}")
     if phase_sign == 1:
         cmd.append("--reverse-phase-sign 1")
+    if model != DEFAULT_MODEL:
+        cmd.append(f"--model {model}")
     sep = "-" * 56
     print()
     print(sep)
@@ -282,7 +292,8 @@ def _gpu_cleanup():
 
 
 def _run_thread(job, work_dir, mode, phase_paths, te_list_ms, mag_path, mask_path,
-                voxel_size, b0, b0_dir, eroded_rad, phase_sign, vmin, vmax, auto_bet2):
+                voxel_size, b0, b0_dir, eroded_rad, phase_sign, vmin, vmax, auto_bet2,
+                model=DEFAULT_MODEL):
     log_q = job["log_queue"]
     orig = sys.stdout
     sys.stdout = _QueueWriter(log_q, orig)
@@ -304,7 +315,7 @@ def _run_thread(job, work_dir, mode, phase_paths, te_list_ms, mag_path, mask_pat
 
             _print_run_config(work_dir, mode, phase_paths, te_list_ms, mag_path,
                               mask_path, voxel_size, b0, b0_dir, eroded_rad, phase_sign,
-                              auto_bet2)
+                              auto_bet2, model)
 
             # Expand 4D phase NIfTI into per-echo 3D files (matches iQSM)
             if mode == "4d":
@@ -352,6 +363,7 @@ def _run_thread(job, work_dir, mode, phase_paths, te_list_ms, mag_path, mask_pat
                     eroded_rad=int(eroded_rad),
                     phase_sign=phase_sign,
                     output_dir=str(out_dir),
+                    model=model,
                 )
             else:
                 print("============================")
@@ -372,6 +384,7 @@ def _run_thread(job, work_dir, mode, phase_paths, te_list_ms, mag_path, mask_pat
                         eroded_rad=int(eroded_rad),
                         phase_sign=phase_sign,
                         output_dir=str(echo_out),
+                        model=model,
                     )
                     q_img = nib.load(q_path)
                     if affine is None:
@@ -627,7 +640,7 @@ def _stream_job(job):
 
 def run_pipeline(phase_files, te_ms_str, mag_files, mask_file, auto_bet2,
                  voxel_str, b0_val, b0dir_str, eroded_rad, negate_phase,
-                 vmin, vmax):
+                 vmin, vmax, model=DEFAULT_MODEL):
     _noop = (
         None, "",                                        # files, info
         None,                                            # qsm_image
@@ -781,7 +794,8 @@ def run_pipeline(phase_files, te_ms_str, mag_files, mask_file, auto_bet2,
         target=_run_thread,
         args=(job, work_dir, mode, phase_paths, te_list_ms, mag_path, mask_path,
               voxel_size, float(b0_val), b0_dir, int(eroded_rad), phase_sign,
-              float(vmin), float(vmax), bool(auto_bet2)),
+              float(vmin), float(vmax), bool(auto_bet2),
+              model if model in MODEL_VARIANTS else DEFAULT_MODEL),
         daemon=True,
     ).start()
 
@@ -1242,6 +1256,18 @@ with gr.Blocks(title="iQSM+", analytics_enabled=False) as app:
                     info="Enable if iron-rich deep grey matter appears dark "
                          "(rather than bright) in the QSM output.",
                 )
+            model_choice = gr.Radio(
+                label="Model",
+                choices=[("Healthy brains (default)", "healthy"),
+                         ("Haemorrhage / ICH", "ich")],
+                value=DEFAULT_MODEL,
+                interactive=True,
+                info="Both models share the same architecture and differ only in "
+                     "their training data. Switch to the ICH model for "
+                     "intracranial haemorrhage or other large susceptibility "
+                     "sources; it must be downloaded first with "
+                     "'python run.py --download-checkpoints --model ich'.",
+            )
 
         run_btn = gr.Button("Run Reconstruction", variant="primary",
                             elem_id="dr-run-btn")
@@ -1606,7 +1632,7 @@ with gr.Blocks(title="iQSM+", analytics_enabled=False) as app:
         run_pipeline,
         inputs=[accumulated_phase, te_ms, accumulated_mag, mask_file, auto_bet2_cb,
                 voxel_str, b0_val, b0dir_str, eroded_rad, negate_phase,
-                vmin_input, vmax_input],
+                vmin_input, vmax_input, model_choice],
         outputs=[log_out, result_file, result_info,
                  img_qsm, img_phase, img_mag, img_mask,
                  output_state, slice_slider,

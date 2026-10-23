@@ -27,6 +27,31 @@ _CKPT_FILENAMES = [
     "LoTLayer_chi.pth",
 ]
 
+# ---------------------------------------------------------------------------
+# Model variants
+# ---------------------------------------------------------------------------
+# Two sets of weights share the same architecture and the same file names, and
+# differ only in their training data. Each variant lives in its own
+# subdirectory, both locally under checkpoints/ and in the Hugging Face repo:
+#
+#   "healthy"  trained on healthy brains only  ->  checkpoints/healthy/  (DEFAULT)
+#   "ich"      training set includes intracranial haemorrhage; these are the
+#              weights this repository shipped previously  ->  checkpoints/
+#              (repository root, left in place so existing installations and
+#              scripts keep working unchanged)
+#
+# Pick "ich" for haemorrhage or other large susceptibility sources, "healthy"
+# for everything else.
+DEFAULT_MODEL = "healthy"
+MODEL_VARIANTS = {
+    "healthy": "healthy",
+    "ich": "",
+}
+MODEL_DESCRIPTIONS = {
+    "healthy": "healthy-brain model (default)",
+    "ich": "haemorrhage-capable model (ICH)",
+}
+
 from models.lot_unet import LoT_Unet, LoTLayer  # noqa: E402
 from models.unet import Unet  # noqa: E402
 
@@ -35,24 +60,42 @@ class CheckpointNotFoundError(Exception):
     """Raised when model checkpoint files have not been downloaded yet."""
 
 
-_CKPT_NOT_FOUND_MSG = """\
-Model weights not found in checkpoints/.
+def _variant_subdir(model: str) -> str:
+    """Map a model-variant name to its checkpoint subdirectory."""
+    try:
+        return MODEL_VARIANTS[model]
+    except KeyError:
+        raise ValueError(
+            f"Unknown model {model!r}. Choose one of: {', '.join(MODEL_VARIANTS)}."
+        ) from None
+
+
+def _ckpt_not_found_msg(model: str, where: str) -> str:
+    flag = "" if model == DEFAULT_MODEL else f" --model {model}"
+    return f"""\
+Weights for the '{model}' model ({MODEL_DESCRIPTIONS[model]}) were not found in
+{where}.
 
 Run this command on the host machine (outside Docker) before starting the app:
 
-    python run.py --download-checkpoints
+    python run.py --download-checkpoints{flag}
 
 This downloads the weights into the checkpoints/ folder that Docker mounts.
 Once done, click Run again — no restart needed.\
 """
 
 
-def _ckpt(filename: str) -> str:
-    """Return local path to a checkpoint, raising CheckpointNotFoundError if absent."""
-    local = os.path.join(_CKPT_DIR, filename)
+def _ckpt(filename: str, model: str = DEFAULT_MODEL) -> str:
+    """Return the local path to one checkpoint file of the given model variant.
+
+    Raises CheckpointNotFoundError if it has not been downloaded yet.
+    """
+    subdir = _variant_subdir(model)
+    ckpt_dir = os.path.join(_CKPT_DIR, subdir) if subdir else _CKPT_DIR
+    local = os.path.join(ckpt_dir, filename)
     if os.path.exists(local):
         return local
-    raise CheckpointNotFoundError(_CKPT_NOT_FOUND_MSG)
+    raise CheckpointNotFoundError(_ckpt_not_found_msg(model, ckpt_dir))
 
 
 # ---------------------------------------------------------------------------
@@ -74,9 +117,9 @@ _CONV_OP = np.array(
 _model_cache: dict = {}
 
 
-def get_model(device: torch.device) -> nn.Module:
-    """Load (or return cached) iQSM+ model."""
-    key = str(device)
+def get_model(device: torch.device, model: str = DEFAULT_MODEL) -> nn.Module:
+    """Load (or return cached) the iQSM+ network for one model variant."""
+    key = (str(device), model)
     if key in _model_cache:
         return _model_cache[key]
 
@@ -85,7 +128,9 @@ def get_model(device: torch.device) -> nn.Module:
     lot_layer = LoTLayer(conv_op)
     lot_layer = nn.DataParallel(lot_layer)
     lot_layer.load_state_dict(
-        torch.load(_ckpt("LoTLayer_chi.pth"), map_location=device, weights_only=True)
+        torch.load(
+            _ckpt("LoTLayer_chi.pth", model), map_location=device, weights_only=True
+        )
     )
     lot_layer = lot_layer.module
     lot_layer.eval()
@@ -93,19 +138,21 @@ def get_model(device: torch.device) -> nn.Module:
     unet = Unet(4, 16, 1)
     unet = nn.DataParallel(unet)
     unet.load_state_dict(
-        torch.load(_ckpt("iQSM_plus.pth"), map_location=device, weights_only=True)
+        torch.load(
+            _ckpt("iQSM_plus.pth", model), map_location=device, weights_only=True
+        )
     )
     unet = unet.module
     unet.eval()
 
-    model = LoT_Unet(lot_layer, unet)
+    net = LoT_Unet(lot_layer, unet)
     if torch.cuda.device_count() > 1:
-        model = nn.DataParallel(model)
-    model.to(device)
-    model.eval()
+        net = nn.DataParallel(net)
+    net.to(device)
+    net.eval()
 
-    _model_cache[key] = model
-    return model
+    _model_cache[key] = net
+    return net
 
 
 # ---------------------------------------------------------------------------
@@ -293,6 +340,7 @@ def run_iqsm_plus(
     phase_sign: int = -1,
     output_dir: str | None = None,
     progress_fn=None,
+    model: str = DEFAULT_MODEL,
 ) -> str:
     """
     Run iQSM+ QSM reconstruction in pure Python — single-echo.
@@ -511,9 +559,9 @@ def run_iqsm_plus(
     # ------------------------------------------------------------------
     # 4. Deep learning inference
     # ------------------------------------------------------------------
-    _log(0.25, "Loading iQSM+ model …")
+    _log(0.25, f"Loading iQSM+ model ({MODEL_DESCRIPTIONS[model]}) …")
     t0 = time.perf_counter()
-    model = get_model(device)
+    net = get_model(device, model)
     logging.info("Model loaded in %.1f s", time.perf_counter() - t0)
     _log_mem("after model load")
 
@@ -531,7 +579,7 @@ def run_iqsm_plus(
     mask_t = mask_t.unsqueeze(0).unsqueeze(0).to(device)    # (1, 1, H, W, D)
 
     with torch.inference_mode():
-        pred_chi = model(phase_t, mask_t, te_t, b0_t, z_prjs_t) * mask_t  # (1, 1, H, W, D)
+        pred_chi = net(phase_t, mask_t, te_t, b0_t, z_prjs_t) * mask_t  # (1, 1, H, W, D)
 
     pred_chi = pred_chi.squeeze().cpu().numpy().astype(np.float32)        # (H, W, D)
 

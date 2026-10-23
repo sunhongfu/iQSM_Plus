@@ -1,5 +1,6 @@
 # Checkpoints (downloaded from HF Hub via: python run.py --download-checkpoints)
-checkpoints/*.pth
+checkpoints/**/*.pth
+checkpoints/**/CHECKPOINT_SOURCE*.json
 
 # Demo NIfTI files (downloaded from HF Hub via: python run.py --download-demo)
 demo/*.nii
